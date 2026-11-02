@@ -12,3 +12,6 @@ build/
 # Signing keys never go in the repository
 *.jks
 *.keystore
+
+# Release signing passwords
+keystore.properties
