@@ -5,6 +5,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -128,16 +129,18 @@ fun EmptyState(title: String, body: String, modifier: Modifier = Modifier) {
     }
 }
 
-/** Dropdown for choosing an ingredient's shopping category; null = "Da classificare". */
+/** Dropdown for choosing an ingredient's shopping category; null = "Da classificare". [extra] goes above the list. */
 @Composable
 fun CategoryMenu(
     expanded: Boolean,
     data: AppData,
     selected: Long?,
     onDismiss: () -> Unit,
+    extra: @Composable ColumnScope.() -> Unit = {},
     onSelect: (Long?) -> Unit,
 ) {
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        extra()
         data.sortedCategories.forEach { c ->
             DropdownMenuItem(
                 text = { Text(c.name, fontWeight = if (c.id == selected) FontWeight.Bold else null) },

@@ -84,6 +84,8 @@ fun SpesamiApp(vm: AppViewModel) {
             var tab by rememberSaveable { mutableStateOf(Tab.PLAN) }
             var showIngredients by rememberSaveable { mutableStateOf(false) }
             var showCategories by rememberSaveable { mutableStateOf(false) }
+            // Survives rotation / activity recreation, never a fresh app start.
+            var shoppingMode by rememberSaveable { mutableStateOf(false) }
             var editing by remember { mutableStateOf<RecipeEditRequest?>(null) }
             val snackbar = remember { SnackbarHostState() }
             LaunchedEffect(Unit) { vm.messages.collect { snackbar.showSnackbar(it) } }
@@ -101,6 +103,7 @@ fun SpesamiApp(vm: AppViewModel) {
                     onDelete = editRequest.recipe?.let { r -> { vm.deleteRecipe(r.id); editing = null } },
                     onClose = { editing = null },
                 )
+                shoppingMode -> ShoppingModeScreen(vm, current, week, prefs, snackbar) { shoppingMode = false }
                 showCategories -> CategoriesScreen(vm, current) { showCategories = false }
                 showIngredients -> IngredientsScreen(vm, current, onBack = { showIngredients = false }, onOpenCategories = { showCategories = true })
                 else -> Scaffold(
@@ -122,7 +125,7 @@ fun SpesamiApp(vm: AppViewModel) {
                         when (tab) {
                             Tab.PLAN -> PlanScreen(vm, current, week, pdfPalette) { editing = it }
                             Tab.RECIPES -> RecipesScreen(current, { editing = it }, { showIngredients = true })
-                            Tab.SHOPPING -> ShoppingScreen(vm, current, week, prefs, pdfPalette)
+                            Tab.SHOPPING -> ShoppingScreen(vm, current, week, prefs, pdfPalette) { shoppingMode = true }
                             Tab.MORE -> SettingsScreen(vm, current, prefs, { showIngredients = true }, { showCategories = true })
                         }
                     }

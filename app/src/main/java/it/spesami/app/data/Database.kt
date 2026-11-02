@@ -10,7 +10,7 @@ import it.spesami.core.IngredientNames
 
 class SpesamiDatabase(context: Context, name: String? = "spesami.db") : SQLiteOpenHelper(context, name, null, VERSION) {
     companion object {
-        const val VERSION = 2
+        const val VERSION = 3
     }
 
     override fun onConfigure(db: SQLiteDatabase) {
@@ -57,11 +57,29 @@ class SpesamiDatabase(context: Context, name: String? = "spesami.db") : SQLiteOp
                 PRIMARY KEY (week_start, day, meal))"""
         )
         db.execSQL("CREATE TABLE preference (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        createChecklistTables(db)
     }
 
     /** Runs inside a transaction: if any step fails, the database stays at the old version, untouched. */
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) migrateTo2(db)
+        if (oldVersion < 3) createChecklistTables(db)
+    }
+
+    /**
+     * Version 3: the weekly shopping checklist. The list itself is still computed from the meal plan; these tables
+     * only hold what cannot be derived: which products were bought, and which were added by hand, per week and
+     * stable ingredient id. Additive only, so existing data is untouched.
+     */
+    private fun createChecklistTables(db: SQLiteDatabase) {
+        for (table in listOf("shopping_purchased", "shopping_extra")) {
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS $table (
+                    week_start TEXT NOT NULL,
+                    ingredient_id INTEGER NOT NULL REFERENCES ingredient(id) ON DELETE CASCADE,
+                    PRIMARY KEY (week_start, ingredient_id))"""
+            )
+        }
     }
 
     /**

@@ -15,13 +15,30 @@ Pianificatore settimanale di pranzi e cene per Android, con lista della spesa ge
 
 - **Piano**: 7 days × lunch/dinner, week navigation, copy previous week, clear week, themed PDF export (A4 landscape).
 - **Ricette**: reusable recipes, each with a name, notes, and a list of ingredient names (no quantities).
-- **Spesa**: ingredients aggregated from the week's meals and deduplicated by canonical name and alias,
-  with the number of meals each one appears in. The list is grouped by category (in the configured order,
-  A–Z inside each category, "Da classificare" last); tap an ingredient to change its category.
+- **Spesa**: a weekly checklist. Ingredients are aggregated from the week's meals and deduplicated by canonical
+  name and alias, with the number of meals each one appears in. The list is grouped by category (in the configured
+  order, collapsible, still-to-buy before purchased and A–Z inside each category, "Da classificare" last).
+  - Tap a row to tick it as purchased (no confirmation); *Da comprare* / *Acquistati* views; progress card
+    ("8 di 15 prodotti acquistati", bar, percentage) counting distinct products, not occurrences.
+  - Each week has its own state, kept across restarts and never reset automatically. Marks are keyed by the
+    stable ingredient id, so changing meals, counts, names or categories keeps them, and an ingredient that leaves
+    the plan and comes back is restored as it was.
+  - *Aggiungi prodotto*: products outside the plan (Detersivo, Sapone…) for the selected week, with a category.
+    They never touch recipes or the plan, and one that matches a planned ingredient is shown once.
+  - *Reimposta acquisti* (⋮ menu): unchecks the selected week after confirmation; everything else stays.
+  - *Avvia modalità spesa*: a full-screen, one-handed view of the same checklist for use in the shop. It shows
+    remaining products by category ("Frutta e verdura — 3 da comprare", collapsible, with quick category chips),
+    "Già acquistati" collapsed below, a search field, the progress, and *Aggiungi prodotto* / *Termina spesa*.
+    Every tick is saved at once and offers *ANNULLA*, which writes the previous state back. While the mode is visible
+    the screen stays on through the window's `FLAG_KEEP_SCREEN_ON` (no WakeLock, no permission, no service). It is
+    released when you leave the mode or the app goes to the background, and it can be turned off with *Mantieni
+    schermo acceso durante la spesa* in Altro. The mode survives rotation but never opens by itself on app start.
+  - ⋮ on a row: change its category, or remove a hand-added product.
   - *Condividi lista della spesa*: `text/plain` through the Android share sheet, one tap, using the saved settings.
   - *Copia lista*: copies to the clipboard.
   - *Esporta PDF*: themed A4 list with tick boxes and category headings, saved to a file or shared.
-  - *Esporta lista della spesa* (settings icon): group by category, include occurrence counts (`Patate ×4`),
+  - *Esporta lista della spesa* (settings icon): *Solo da comprare* (default) or *Lista completa* (optionally
+    with purchased products ticked in the PDF), group by category, include occurrence counts (`Patate ×4`),
     show category headings, choose which categories to include, and preview the exact text.
     Plain text: one item per line, `\n` line ends, UTF-8, upper-case headings with a blank line between categories.
 - **Categorie della spesa**: 12 seeded Italian categories with stable ids; create, rename, reorder, delete.
@@ -33,13 +50,17 @@ Pianificatore settimanale di pranzi e cene per Android, con lista della spesa ge
   ingredient's name merges the two.
 - **Altro**: app theme (system / light / Dracula dark), PDF style (same as the app / Chiaro / Dracula /
   Risparmio inchiostro), manual JSON backup and restore. Restore validates the file first, including category
-  references, and asks for confirmation before replacing local data. Version 1 backups are still accepted.
+  references, and asks for confirmation before replacing local data. Backups include the checklist state;
+  version 1 and 2 backups are still accepted.
 
 ## Database
 
 SQLite through `SQLiteOpenHelper` (`app/.../data/Database.kt`). Schema version 2 added `shopping_category`
 and `ingredient.category_id` / `category_manual`. The migration from version 1 runs in one transaction, seeds the
 default categories only into an empty table, and maps the old fixed categories to the new ones as manual choices.
+Schema version 3 added the weekly checklist: `shopping_purchased` and `shopping_extra`, both keyed by
+`(week_start, ingredient_id)`. The list itself is still computed from the meal plan; these tables hold only the
+purchased marks and the hand-added products. The migration only creates tables, so existing data is untouched.
 
 ## Structure
 
@@ -48,7 +69,8 @@ default categories only into an empty table, and maps the old fixed categories t
   filtering and text export, PDF list pagination, Italian week labels, and the versioned backup format with its
   validation. Future desktop builds (Windows portable, Linux AppImage) can reuse it as is.
 - `app/`: Android with Jetpack Compose. `data/` (SQLiteOpenHelper + repository), `pdf/` (`PdfDocument`
-  rendering), `ui/` (screens, theme, share and clipboard helpers).
+  rendering), `platform/` (Android `ScreenAwakeController`), `ui/` (screens, theme, share and clipboard helpers).
+  `core` defines `ScreenAwakeController` with a no-op default, so desktop builds need no Android API.
 
 ## Build
 

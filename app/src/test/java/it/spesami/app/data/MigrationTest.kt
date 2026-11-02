@@ -79,4 +79,37 @@ class MigrationTest {
         assertEquals(12, Repository(again).load().categories.size)
         again.close()
     }
+
+    @Test
+    fun version2DatabaseGetsTheChecklist() {
+        val name = "migration-v2-test.db"
+        context.deleteDatabase(name)
+        SpesamiDatabase(context, name).also { helper ->
+            val repo = Repository(helper)
+            val recipe = repo.saveRecipe(null, "Frittata", "", listOf("Patate", "Uova"))
+            repo.setMeal(week, 0, MealType.LUNCH, recipe)
+            // Back to the exact version 2 schema.
+            helper.writableDatabase.apply {
+                execSQL("DROP TABLE shopping_purchased")
+                execSQL("DROP TABLE shopping_extra")
+                version = 2
+            }
+            helper.close()
+        }
+
+        val helper = SpesamiDatabase(context, name)
+        val repo = Repository(helper)
+        val before = repo.load()
+        assertEquals(listOf("Patate", "Uova"), ShoppingList.build(before, week).map { it.name }.sorted())
+        assertTrue(before.purchases.isEmpty() && before.manualItems.isEmpty())
+
+        val patate = before.ingredients.single { it.name == "Patate" }.id
+        repo.setPurchased(week, patate, true)
+        repo.addProduct(week, "Detersivo")
+        val after = repo.load()
+        assertTrue(after.isPurchased(week, patate))
+        assertEquals(3, ShoppingList.build(after, week).size)
+        helper.close()
+        context.deleteDatabase(name)
+    }
 }

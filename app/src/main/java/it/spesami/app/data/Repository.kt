@@ -12,6 +12,7 @@ import it.spesami.core.MealSlot
 import it.spesami.core.MealType
 import it.spesami.core.Recipe
 import it.spesami.core.ShoppingCategory
+import it.spesami.core.WeekItem
 import java.time.LocalDate
 
 /** All reads and writes of the local database. Call from a background thread. */
@@ -55,7 +56,10 @@ class Repository(private val helper: SpesamiDatabase) {
         val preferences = db.rawQuery("SELECT key, value FROM preference", null).use { c ->
             buildMap { while (c.moveToNext()) put(c.getString(0), c.getString(1)) }
         }
-        return AppData(ingredients, aliases, recipes, slots, categories, preferences)
+        fun weekItems(table: String) = db.rawQuery("SELECT week_start, ingredient_id FROM $table", null).use { c ->
+            buildList { while (c.moveToNext()) add(WeekItem(LocalDate.parse(c.getString(0)), c.getLong(1))) }
+        }
+        return AppData(ingredients, aliases, recipes, slots, categories, preferences, weekItems("shopping_purchased"), weekItems("shopping_extra"))
     }
 
     // --- Recipes ---
@@ -117,6 +121,56 @@ class Repository(private val helper: SpesamiDatabase) {
             "INSERT INTO meal_slot (week_start, day, meal, recipe_id) SELECT ?, day, meal, recipe_id FROM meal_slot WHERE week_start = ?",
             arrayOf(to.toString(), from.toString()),
         )
+    }
+
+    // --- Weekly shopping checklist ---
+
+    /** Marks or unmarks one product of [weekStart]'s list as purchased. Other weeks are independent. */
+    fun setPurchased(weekStart: LocalDate, ingredientId: Long, purchased: Boolean) {
+        if (purchased) {
+            db.insertWithOnConflict("shopping_purchased", null, weekItem(weekStart, ingredientId), SQLiteDatabase.CONFLICT_IGNORE)
+        } else {
+            db.delete("shopping_purchased", "week_start = ? AND ingredient_id = ?", arrayOf(weekStart.toString(), ingredientId.toString()))
+        }
+    }
+
+    /** "Reimposta acquisti": unchecks everything of one week; plan, recipes, categories and added products stay. */
+    fun resetPurchases(weekStart: LocalDate) {
+        db.delete("shopping_purchased", "week_start = ?", arrayOf(weekStart.toString()))
+    }
+
+    sealed interface ProductChange {
+        data class Added(val name: String) : ProductChange
+        data class AlreadyListed(val name: String) : ProductChange
+        data object Empty : ProductChange
+    }
+
+    /**
+     * "Aggiungi prodotto": puts [name] on [weekStart]'s list without touching recipes or the plan. The product is
+     * matched to an existing ingredient or alias (so "Patate" never shows twice) or created, classified by the
+     * dictionary unless [categoryId] is given; [categoryId] is applied as a manual choice. An explicitly added
+     * product is something to buy, so it is (re)marked as still to buy.
+     */
+    fun addProduct(weekStart: LocalDate, name: String, categoryId: Long? = null, setCategory: Boolean = false): ProductChange = inTransaction {
+        if (IngredientNames.key(name).isEmpty()) return@inTransaction ProductChange.Empty
+        val id = findOrCreateIngredient(name)
+        if (setCategory) setIngredientCategory(id, categoryId)
+        val listed = db.rawQuery(
+            "SELECT 1 FROM shopping_extra WHERE week_start = ? AND ingredient_id = ?", arrayOf(weekStart.toString(), id.toString()),
+        ).use { it.moveToFirst() }
+        if (!listed) db.insertOrThrow("shopping_extra", null, weekItem(weekStart, id))
+        setPurchased(weekStart, id, false)
+        if (!listed) ProductChange.Added(ingredientName(id)) else ProductChange.AlreadyListed(ingredientName(id))
+    }
+
+    /** Removes a hand-added product from one week; it stays only if a planned meal still needs it. */
+    fun removeProduct(weekStart: LocalDate, ingredientId: Long) {
+        db.delete("shopping_extra", "week_start = ? AND ingredient_id = ?", arrayOf(weekStart.toString(), ingredientId.toString()))
+    }
+
+    private fun weekItem(weekStart: LocalDate, ingredientId: Long) = ContentValues().apply {
+        put("week_start", weekStart.toString())
+        put("ingredient_id", ingredientId)
     }
 
     // --- Ingredients and aliases ---
@@ -195,6 +249,13 @@ class Repository(private val helper: SpesamiDatabase) {
             arrayOf(targetId, sourceId),
         )
         db.execSQL("UPDATE ingredient_alias SET ingredient_id = ? WHERE ingredient_id = ?", arrayOf(targetId, sourceId))
+        // The merged item keeps its checklist state in every week.
+        for (table in listOf("shopping_purchased", "shopping_extra")) {
+            db.execSQL(
+                "INSERT OR IGNORE INTO $table (week_start, ingredient_id) SELECT week_start, ? FROM $table WHERE ingredient_id = ?",
+                arrayOf(targetId, sourceId),
+            )
+        }
         // A target without any category (and no explicit choice) takes the source's.
         db.execSQL(
             "UPDATE ingredient SET category_id = (SELECT category_id FROM ingredient WHERE id = ?), " +
@@ -283,7 +344,7 @@ class Repository(private val helper: SpesamiDatabase) {
 
     /** Replaces all local data with [data] (already validated) in one transaction. */
     fun replaceAll(data: AppData) = inTransaction {
-        listOf("meal_slot", "recipe_ingredient", "recipe", "ingredient_alias", "ingredient", "shopping_category", "preference").forEach {
+        listOf("shopping_purchased", "shopping_extra", "meal_slot", "recipe_ingredient", "recipe", "ingredient_alias", "ingredient", "shopping_category", "preference").forEach {
             db.delete(it, null, null)
         }
         db.execSQL("DELETE FROM sqlite_sequence")
@@ -322,6 +383,8 @@ class Repository(private val helper: SpesamiDatabase) {
         }
         data.slots.forEach { setMeal(it.weekStart, it.day, it.meal, it.recipeId) }
         data.preferences.forEach { (k, v) -> setPreference(k, v) }
+        data.manualItems.forEach { db.insertOrThrow("shopping_extra", null, weekItem(it.weekStart, it.ingredientId)) }
+        data.purchases.forEach { db.insertOrThrow("shopping_purchased", null, weekItem(it.weekStart, it.ingredientId)) }
     }
 
     // --- Helpers ---

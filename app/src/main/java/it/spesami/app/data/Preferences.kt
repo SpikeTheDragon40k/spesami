@@ -1,6 +1,7 @@
 package it.spesami.app.data
 
 import it.spesami.core.ExportOptions
+import it.spesami.core.ExportScope
 import it.spesami.core.ShoppingSort
 
 enum class AppTheme(val label: String) { SYSTEM("Automatico (sistema)"), LIGHT("Chiaro"), DRACULA("Dracula scuro") }
@@ -17,6 +18,8 @@ data class Preferences(
     val theme: AppTheme = AppTheme.SYSTEM,
     val pdfTheme: PdfTheme = PdfTheme.APP,
     val export: ExportOptions = ExportOptions(),
+    /** "Mantieni schermo acceso durante la spesa". */
+    val keepScreenOn: Boolean = true,
 ) {
     companion object {
         const val THEME = "theme"
@@ -26,6 +29,9 @@ data class Preferences(
         const val GROUP_BY_CATEGORY = "group_by_category"
         const val SHOW_CATEGORY_HEADERS = "show_category_headers"
         const val EXCLUDED_CATEGORIES = "export_excluded_categories"
+        const val EXPORT_SCOPE = "export_scope"
+        const val PDF_MARK_PURCHASED = "pdf_mark_purchased"
+        const val KEEP_SCREEN_ON = "shopping_keep_screen_on"
 
         /** "Da classificare" in [EXCLUDED_CATEGORIES], which otherwise lists category ids. */
         private const val UNCLASSIFIED = "none"
@@ -39,7 +45,10 @@ data class Preferences(
                 showHeaders = map[SHOW_CATEGORY_HEADERS] != "false",
                 excludedCategories = decodeExcluded(map[EXCLUDED_CATEGORIES]),
                 sort = ShoppingSort.entries.firstOrNull { it.name == map[SHOPPING_SORT] } ?: ShoppingSort.COUNT,
+                scope = ExportScope.entries.firstOrNull { it.name == map[EXPORT_SCOPE] } ?: ExportScope.PENDING,
+                markPurchased = map[PDF_MARK_PURCHASED] != "false",
             ),
+            keepScreenOn = map[KEEP_SCREEN_ON] != "false",
         )
 
         fun encodeExcluded(ids: Set<Long?>): String = ids.joinToString(",") { it?.toString() ?: UNCLASSIFIED }

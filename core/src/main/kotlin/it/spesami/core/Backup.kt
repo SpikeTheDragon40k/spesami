@@ -19,10 +19,13 @@ data class BackupFile(
     val recipes: List<BackupRecipe>,
     val mealPlan: List<BackupMeal>,
     val preferences: Map<String, String> = emptyMap(),
+    /** Since version 3: products added by hand and purchased marks of each week's checklist. */
+    val shoppingExtras: List<BackupWeekItem> = emptyList(),
+    val shoppingPurchased: List<BackupWeekItem> = emptyList(),
 ) {
     companion object {
         const val FORMAT = "spesami-backup"
-        const val VERSION = 2
+        const val VERSION = 3
     }
 }
 
@@ -49,6 +52,10 @@ data class BackupRecipe(val id: Long, val name: String, val notes: String = "", 
 @Serializable
 data class BackupMeal(val weekStart: String, val day: Int, val meal: String, val recipeId: Long)
 
+/** [weekStart] is an ISO date (a Monday). */
+@Serializable
+data class BackupWeekItem(val weekStart: String, val ingredientId: Long)
+
 sealed interface BackupReadResult {
     data class Valid(val data: AppData, val summary: String) : BackupReadResult
     data class Invalid(val errors: List<String>) : BackupReadResult
@@ -72,6 +79,8 @@ object Backup {
             recipes = data.recipes.map { BackupRecipe(it.id, it.name, it.notes, it.ingredientIds) },
             mealPlan = data.slots.map { BackupMeal(it.weekStart.toString(), it.day, it.meal.name, it.recipeId) },
             preferences = data.preferences,
+            shoppingExtras = data.manualItems.map { BackupWeekItem(it.weekStart.toString(), it.ingredientId) },
+            shoppingPurchased = data.purchases.map { BackupWeekItem(it.weekStart.toString(), it.ingredientId) },
         ),
     )
 
@@ -152,12 +161,29 @@ object Backup {
             }
             null
         }
+        fun weekItems(list: List<BackupWeekItem>, what: String): List<WeekItem> = list.mapNotNull { w ->
+            val week = try {
+                LocalDate.parse(w.weekStart)
+            } catch (e: DateTimeParseException) {
+                errors += "Data non valida nella lista della spesa: \"${w.weekStart}\"."
+                return@mapNotNull null
+            }
+            when {
+                week != Weeks.startOf(week) -> errors += "La settimana ${w.weekStart} non inizia di lunedì."
+                w.ingredientId !in ingredientIds -> errors += "$what usa un ingrediente inesistente (${w.ingredientId})."
+                else -> return@mapNotNull WeekItem(week, w.ingredientId)
+            }
+            null
+        }.distinct()
+        val manualItems = weekItems(file.shoppingExtras, "Un prodotto aggiunto alla spesa")
+        val purchases = weekItems(file.shoppingPurchased, "Un prodotto acquistato")
         if (errors.isNotEmpty()) return BackupReadResult.Invalid(errors.distinct())
 
-        val data = AppData(ingredients, aliases, recipes, slots, categories, file.preferences)
+        val data = AppData(ingredients, aliases, recipes, slots, categories, file.preferences, purchases, manualItems)
         val weeks = slots.map { it.weekStart }.distinct().size
         val summary = "${recipes.size} ricette, ${ingredients.size} ingredienti, ${aliases.size} alias, " +
-            "${categories.size} categorie, ${slots.size} pasti in $weeks settimane (backup del ${file.createdAt.take(10)})"
+            "${categories.size} categorie, ${slots.size} pasti in $weeks settimane, " +
+            "${manualItems.size} prodotti aggiunti alla spesa (backup del ${file.createdAt.take(10)})"
         return BackupReadResult.Valid(data, summary)
     }
 

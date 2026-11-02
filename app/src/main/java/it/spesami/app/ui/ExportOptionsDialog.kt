@@ -41,6 +41,7 @@ import it.spesami.app.AppViewModel
 import it.spesami.app.data.Preferences
 import it.spesami.core.AppData
 import it.spesami.core.DefaultCategories
+import it.spesami.core.ExportScope
 import it.spesami.core.ShoppingGroup
 import it.spesami.core.ShoppingSort
 import java.time.LocalDate
@@ -91,6 +92,26 @@ fun ExportOptionsDialog(
                 },
             ) { padding ->
                 Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())) {
+                    SectionTitle("Cosa esportare")
+                    Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ExportScope.entries.forEach { scope ->
+                            FilterChip(
+                                selected = o.scope == scope,
+                                onClick = { vm.setPreference(Preferences.EXPORT_SCOPE, scope.name) },
+                                label = { Text(scope.label) },
+                            )
+                        }
+                    }
+                    Text(
+                        if (o.scope == ExportScope.PENDING) "Esclude i prodotti già acquistati." else "Tutti i prodotti, acquistati compresi.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    )
+                    SwitchRow("Nel PDF, spunta i prodotti acquistati", o.markPurchased && o.scope == ExportScope.ALL, enabled = o.scope == ExportScope.ALL) {
+                        vm.setPreference(Preferences.PDF_MARK_PURCHASED, it.toString())
+                    }
+                    SectionTitle("Formato")
                     SwitchRow("Raggruppa per categoria", o.groupByCategory) {
                         vm.setPreference(Preferences.GROUP_BY_CATEGORY, it.toString())
                     }
@@ -128,7 +149,7 @@ fun ExportOptionsDialog(
                         ListItem(
                             headlineContent = { Text(name) },
                             supportingContent = {
-                                Text(if (count == 0) "Nessun ingrediente questa settimana" else if (count == 1) "1 ingrediente" else "$count ingredienti")
+                                Text(if (count == 0) "Nessun prodotto questa settimana" else if (count == 1) "1 prodotto" else "$count prodotti")
                             },
                             leadingContent = { Checkbox(checked = included, onCheckedChange = null) },
                             modifier = Modifier.toggleable(value = included, role = Role.Checkbox) {
@@ -144,7 +165,7 @@ fun ExportOptionsDialog(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                     ) {
                         Text(
-                            export.text.ifEmpty { "Nessun ingrediente da esportare." },
+                            export.text.ifEmpty { "Nessun prodotto da esportare." },
                             fontFamily = FontFamily.Monospace,
                             style = MaterialTheme.typography.bodyMedium,
                             color = if (export.text.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
@@ -152,7 +173,7 @@ fun ExportOptionsDialog(
                         )
                     }
                     Text(
-                        "Il testo viene condiviso così com'è, un ingrediente per riga: le app per la spesa che accettano testo incollato o condiviso lo importano come elenco.",
+                        "Il testo viene condiviso così com'è, un prodotto per riga: le app per la spesa che accettano testo incollato o condiviso lo importano come elenco.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(16.dp),

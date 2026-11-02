@@ -10,6 +10,8 @@ import it.spesami.core.AppData
 import it.spesami.core.Backup
 import it.spesami.core.BackupReadResult
 import it.spesami.core.MealType
+import it.spesami.core.ShoppingList
+import it.spesami.core.WeekItem
 import it.spesami.core.Weeks
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -18,17 +20,23 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.temporal.ChronoUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
-    private val repository = Repository(SpesamiDatabase(app))
+    private val database = SpesamiDatabase(app)
+    private val repository = Repository(database)
 
     @OptIn(ExperimentalCoroutinesApi::class)
     private val io = Dispatchers.IO.limitedParallelism(1) // one writer at a time, reloads see every write
+
+    /** Writes queued on [io]; declared before `init`, which already writes. */
+    private val pendingWrites = AtomicInteger()
 
     private val _data = MutableStateFlow<AppData?>(null)
     /** The whole database, reloaded after every change; null until the first load. */
@@ -64,11 +72,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _week.value = Weeks.startOf(LocalDate.now())
     }
 
+    /**
+     * Runs [block] on the single writer thread and then publishes a fresh load. While more writes are queued the
+     * reload waits for the last one, so quick taps (optimistically shown already) never flicker back.
+     */
     private fun write(block: Repository.() -> Unit) {
+        pendingWrites.incrementAndGet()
         viewModelScope.launch {
             withContext(io) {
-                repository.block()
-                _data.value = repository.load()
+                try {
+                    repository.block()
+                } finally {
+                    if (pendingWrites.decrementAndGet() == 0) _data.value = repository.load()
+                }
             }
         }
     }
@@ -94,6 +110,43 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         write { copyWeek(previous, week) }
         message("Piano copiato dalla settimana precedente.")
+    }
+
+    // --- Shopping checklist ---
+
+    /** Checkbox tap: shown immediately, then saved. */
+    fun setPurchased(ingredientId: Long, purchased: Boolean) {
+        val week = _week.value
+        val item = WeekItem(week, ingredientId)
+        _data.update { d -> d?.copy(purchases = if (purchased) d.purchases + item else d.purchases - item) }
+        write { setPurchased(week, ingredientId, purchased) }
+    }
+
+    fun resetPurchases() {
+        val week = _week.value
+        _data.update { d -> d?.copy(purchases = d.purchases.filter { it.weekStart != week }) }
+        write { resetPurchases(week) }
+        message("Acquisti reimpostati: tutti i prodotti sono di nuovo da comprare.")
+    }
+
+    /** [categoryId] is applied only when [setCategory] (the user picked one in the dialog). */
+    fun addProduct(name: String, categoryId: Long?, setCategory: Boolean) {
+        val week = _week.value
+        val planned = _data.value?.let { d -> ShoppingList.build(d, week).filter { it.count > 0 }.map { it.name }.toSet() }.orEmpty()
+        write {
+            when (val change = addProduct(week, name, categoryId, setCategory)) {
+                is Repository.ProductChange.Added -> {
+                    message(if (change.name in planned) "\"${change.name}\" era già nella lista: segnato anche come aggiunto." else "\"${change.name}\" aggiunto alla lista.")
+                }
+                is Repository.ProductChange.AlreadyListed -> message("\"${change.name}\" è già nella lista.")
+                Repository.ProductChange.Empty -> Unit
+            }
+        }
+    }
+
+    fun removeProduct(ingredientId: Long) {
+        val week = _week.value
+        write { removeProduct(week, ingredientId) }
     }
 
     // --- Recipes ---
@@ -197,6 +250,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun dismissRestore() {
         _restore.value = null
+    }
+
+    override fun onCleared() {
+        database.close()
     }
 }
 

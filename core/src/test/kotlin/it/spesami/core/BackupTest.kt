@@ -2,6 +2,10 @@ package it.spesami.core
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 import org.junit.Test
 import java.time.LocalDate
 
@@ -13,6 +17,8 @@ class BackupTest {
         slots = listOf(MealSlot(LocalDate.of(2026, 11, 2), 2, MealType.DINNER, 5)),
         categories = DefaultCategories.seed() + ShoppingCategory(13, "Compostaggio", 12),
         preferences = mapOf("theme" to "DRACULA"),
+        purchases = listOf(WeekItem(LocalDate.of(2026, 11, 2), 1), WeekItem(LocalDate.of(2026, 10, 26), 2)),
+        manualItems = listOf(WeekItem(LocalDate.of(2026, 11, 2), 3)),
     )
 
     @Test
@@ -70,5 +76,23 @@ class BackupTest {
         assertEquals("formaggi", restored.categoryOf(byName.getValue("Parmigiano"))?.builtinKey)
         assertEquals(false, byName.getValue("Parmigiano").categoryManual)
         assertEquals(null, byName.getValue("Boh").categoryId)
+    }
+
+    @Test
+    fun checklistStateIsValidated() {
+        val week = LocalDate.of(2026, 11, 2)
+        val dangling = Backup.decode(Backup.encode(data.copy(purchases = listOf(WeekItem(week, 99))), "2026-11-02"))
+        assertTrue((dangling as BackupReadResult.Invalid).errors.single().contains("inesistente"))
+        val notMonday = Backup.decode(Backup.encode(data.copy(manualItems = listOf(WeekItem(week.plusDays(1), 1))), "2026-11-02"))
+        assertTrue((notMonday as BackupReadResult.Invalid).errors.single().contains("lunedì"))
+    }
+
+    @Test
+    fun version2BackupHasEmptyChecklist() {
+        val full = Json.parseToJsonElement(Backup.encode(data, "2026-11-02")).jsonObject
+        val v2 = JsonObject(full - "shoppingExtras" - "shoppingPurchased" + ("version" to JsonPrimitive(2))).toString()
+        val result = Backup.decode(v2) as BackupReadResult.Valid
+        assertTrue(result.data.purchases.isEmpty() && result.data.manualItems.isEmpty())
+        assertEquals(data.recipes, result.data.recipes)
     }
 }

@@ -2,6 +2,7 @@ package it.spesami.app.pdf
 
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
@@ -149,14 +150,17 @@ object PdfExporter {
     }
 
     /**
-     * Shopping list: A4 portrait, two columns with a tick box per ingredient. [sections] come from
-     * [ShoppingExport.sections], so grouping, headings, counts and the category filter match the text export.
+     * Shopping list: A4 portrait, two columns with a tick box per product. [sections] come from
+     * [ShoppingExport.sections], so scope, grouping, headings, counts and the category filter match the text export.
+     * With [markPurchased] (full list) purchased products get a ticked box and struck-through name; otherwise
+     * every box is empty, ready to be ticked by hand.
      */
     fun writeShoppingList(
         sections: List<ExportSection>,
         includeCounts: Boolean,
+        markPurchased: Boolean,
         weekStart: LocalDate,
-        mealCount: Int,
+        summary: String,
         palette: PdfPalette,
         out: OutputStream,
     ) {
@@ -167,6 +171,11 @@ object PdfExporter {
         val subtitle = Weeks.rangeLabel(weekStart)
 
         val namePaint = paint(palette.text, 11f)
+        val donePaint = paint(palette.muted, 11f).apply { isStrikeThruText = true }
+        val tick = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = 1.8f; color = palette.accent
+            strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
+        }
         val countPaint = paint(palette.highlight, 10f, bold).apply { textAlign = Paint.Align.RIGHT }
         val headingPaint = paint(palette.accent, 9.5f, bold).apply { letterSpacing = 0.1f }
         val continuedPaint = paint(palette.muted, 8.5f)
@@ -200,9 +209,9 @@ object PdfExporter {
             c.drawColor(palette.background)
             var top = header(c, width, palette, "Lista della spesa", subtitle)
             if (pageIndex == 0) {
-                c.drawText("$itemCount ingredienti da $mealCount pasti", MARGIN, top + 4, summaryPaint)
+                c.drawText(summary, MARGIN, top + 4, summaryPaint)
                 top += summaryHeight
-                if (itemCount == 0) c.drawText("Nessun ingrediente da esportare per questa settimana.", MARGIN, top + 20, namePaint)
+                if (itemCount == 0) c.drawText("Nessun prodotto da esportare per questa settimana.", MARGIN, top + 20, namePaint)
             }
             layoutPage.columns.forEachIndexed { column, lines ->
                 val left = MARGIN + column * (columnWidth + columnGap)
@@ -220,11 +229,16 @@ object PdfExporter {
                             y += headingHeight
                         }
                         is PdfLine.Item -> {
+                            val done = markPurchased && line.item.purchased
                             c.drawRoundRect(RectF(left + 1, y + 4, left + 12, y + 15), 2.5f, 2.5f, box)
-                            val countText = if (includeCounts) "×${line.item.count}" else ""
-                            val nameWidth = columnWidth - 22 - (if (includeCounts) countPaint.measureText(countText) + 8 else 0f)
-                            c.drawText(wrap(line.item.name, namePaint, nameWidth, 1).first(), left + 20, y + 14, namePaint)
-                            if (includeCounts) c.drawText(countText, left + columnWidth, y + 14, countPaint)
+                            if (done) {
+                                c.drawPath(Path().apply { moveTo(left + 3.5f, y + 9.5f); lineTo(left + 6f, y + 12.5f); lineTo(left + 10.5f, y + 6.5f) }, tick)
+                            }
+                            val countText = if (includeCounts && line.item.count > 0) "×${line.item.count}" else ""
+                            val nameWidth = columnWidth - 22 - (if (countText.isNotEmpty()) countPaint.measureText(countText) + 8 else 0f)
+                            val itemPaint = if (done) donePaint else namePaint
+                            c.drawText(wrap(line.item.name, itemPaint, nameWidth, 1).first(), left + 20, y + 14, itemPaint)
+                            if (countText.isNotEmpty()) c.drawText(countText, left + columnWidth, y + 14, countPaint)
                             c.drawLine(left + 20, y + itemHeight - 1, left + columnWidth, y + itemHeight - 1, rule)
                             y += itemHeight
                         }

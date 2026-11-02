@@ -24,8 +24,8 @@ android {
         applicationId = "it.spesami.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 4
+        versionName = "1.3.0"
     }
 
     signingConfigs {
@@ -58,6 +58,9 @@ android {
     }
     testOptions {
         unitTests.isReturnDefaultValues = true
+        unitTests.isIncludeAndroidResources = true // Robolectric uses the merged manifest (Compose UI tests)
+        // The full activity leaves Compose/looper state behind in Robolectric; a fresh JVM per test class isolates it.
+        unitTests.all { it.forkEvery = 1 }
     }
 }
 
@@ -76,4 +79,7 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    debugImplementation(libs.androidx.compose.ui.test.manifest) // test host activity, debug builds only
 }

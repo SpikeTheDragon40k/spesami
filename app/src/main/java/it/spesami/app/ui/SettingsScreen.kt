@@ -27,6 +27,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material3.Switch
 import androidx.compose.ui.unit.dp
 import it.spesami.app.AppViewModel
 import it.spesami.app.data.AppTheme
@@ -57,6 +59,18 @@ fun SettingsScreen(vm: AppViewModel, data: AppData, prefs: Preferences, onOpenIn
             PdfTheme.entries.forEach { theme ->
                 RadioRow(theme.label, prefs.pdfTheme == theme) { vm.setPreference(Preferences.PDF_THEME, theme.name) }
             }
+
+            SectionTitle("Modalità spesa")
+            ListItem(
+                headlineContent = { Text("Mantieni schermo acceso durante la spesa") },
+                supportingContent = {
+                    Text("Lo schermo resterà acceso mentre utilizzi la modalità spesa. Potrebbe aumentare il consumo della batteria.")
+                },
+                trailingContent = { Switch(checked = prefs.keepScreenOn, onCheckedChange = null) },
+                modifier = Modifier.toggleable(value = prefs.keepScreenOn, role = Role.Switch) {
+                    vm.setPreference(Preferences.KEEP_SCREEN_ON, it.toString())
+                },
+            )
 
             SectionTitle("Ingredienti e categorie")
             ListItem(
@@ -96,7 +110,7 @@ fun SettingsScreen(vm: AppViewModel, data: AppData, prefs: Preferences, onOpenIn
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
             Text(
-                "Versione 1.1.0",
+                "Versione 1.3.0",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(16.dp),
