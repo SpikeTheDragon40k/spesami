@@ -7,14 +7,17 @@ import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
 import it.spesami.core.AppData
 import it.spesami.core.MealType
-import it.spesami.core.ShoppingGroup
+import it.spesami.core.ExportSection
+import it.spesami.core.PdfLine
+import it.spesami.core.PdfListLayout
+import it.spesami.core.ShoppingExport
 import it.spesami.core.Weeks
 import java.io.OutputStream
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-/** Colours of an exported PDF, matching the app's Light and Dracula Dark themes. */
+/** Colours of an exported PDF: the app's Light and Dracula themes, plus an ink-saving print style. */
 class PdfPalette(
     val background: Int,
     val surface: Int,
@@ -24,6 +27,8 @@ class PdfPalette(
     val onAccent: Int,
     val highlight: Int,
     val line: Int,
+    /** False draws the title band as an outline instead of a filled block (ink saver). */
+    val solidHeader: Boolean = true,
 ) {
     companion object {
         val Light = PdfPalette(
@@ -45,6 +50,17 @@ class PdfPalette(
             onAccent = 0xFF282A36.toInt(),
             highlight = 0xFFFF79C6.toInt(),
             line = 0xFF44475A.toInt(),
+        )
+        val InkSaver = PdfPalette(
+            background = 0xFFFFFFFF.toInt(),
+            surface = 0xFFFFFFFF.toInt(),
+            text = 0xFF000000.toInt(),
+            muted = 0xFF555555.toInt(),
+            accent = 0xFF333333.toInt(),
+            onAccent = 0xFF000000.toInt(),
+            highlight = 0xFF000000.toInt(),
+            line = 0xFFBBBBBB.toInt(),
+            solidHeader = false,
         )
     }
 }
@@ -132,10 +148,13 @@ object PdfExporter {
         doc.close()
     }
 
-    /** Shopping list: A4 portrait, two columns with a tick box per ingredient, optionally grouped by category. */
+    /**
+     * Shopping list: A4 portrait, two columns with a tick box per ingredient. [sections] come from
+     * [ShoppingExport.sections], so grouping, headings, counts and the category filter match the text export.
+     */
     fun writeShoppingList(
-        groups: List<ShoppingGroup>,
-        showGroupTitles: Boolean,
+        sections: List<ExportSection>,
+        includeCounts: Boolean,
         weekStart: LocalDate,
         mealCount: Int,
         palette: PdfPalette,
@@ -144,73 +163,77 @@ object PdfExporter {
         val width = 595
         val height = 842
         val doc = PdfDocument()
-        val itemCount = groups.sumOf { it.items.size }
+        val itemCount = ShoppingExport.itemCount(sections)
         val subtitle = Weeks.rangeLabel(weekStart)
 
         val namePaint = paint(palette.text, 11f)
         val countPaint = paint(palette.highlight, 10f, bold).apply { textAlign = Paint.Align.RIGHT }
-        val groupPaint = paint(palette.accent, 9.5f, bold).apply { letterSpacing = 0.08f }
+        val headingPaint = paint(palette.accent, 9.5f, bold).apply { letterSpacing = 0.1f }
+        val continuedPaint = paint(palette.muted, 8.5f)
         val summaryPaint = paint(palette.muted, 10f)
         val box = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.2f; color = palette.accent }
         val rule = Paint().apply { color = palette.line; strokeWidth = 0.8f }
+        val headingRule = Paint().apply { color = palette.accent; strokeWidth = 1.2f }
 
         val columnGap = 24f
         val columnWidth = (width - 2 * MARGIN - columnGap) / 2
+        val contentTop = MARGIN + 54 + 18 // below the title band, see header()
+        val summaryHeight = 22f
         val bottom = height - MARGIN - 24
-        val rowHeight = 21f
+        val itemHeight = 21f
+        val headingHeight = 26f
+        val sectionGap = 12f
 
-        // Flatten into entries that flow down the first column, then the second, then onto the next page.
-        val entries = buildList {
-            groups.forEach { g ->
-                if (showGroupTitles) add(g.label to -1)
-                g.items.forEach { add(it.name to it.count) }
-            }
-        }
+        val layout = PdfListLayout(
+            columns = 2,
+            firstPageHeight = bottom - contentTop - summaryHeight,
+            pageHeight = bottom - contentTop,
+            headingHeight = headingHeight,
+            itemHeight = itemHeight,
+            sectionGap = sectionGap,
+        )
+        val pages = layout.paginate(sections)
 
-        var pageNumber = 0
-        var index = 0
-        do {
-            pageNumber++
-            val page = doc.startPage(PdfDocument.PageInfo.Builder(width, height, pageNumber).create())
+        pages.forEachIndexed { pageIndex, layoutPage ->
+            val page = doc.startPage(PdfDocument.PageInfo.Builder(width, height, pageIndex + 1).create())
             val c = page.canvas
             c.drawColor(palette.background)
             var top = header(c, width, palette, "Lista della spesa", subtitle)
-            if (pageNumber == 1) {
+            if (pageIndex == 0) {
                 c.drawText("$itemCount ingredienti da $mealCount pasti", MARGIN, top + 4, summaryPaint)
-                top += 22
+                top += summaryHeight
+                if (itemCount == 0) c.drawText("Nessun ingrediente da esportare per questa settimana.", MARGIN, top + 20, namePaint)
             }
-            if (entries.isEmpty()) {
-                c.drawText("Nessun pasto pianificato per questa settimana.", MARGIN, top + 20, namePaint)
-            }
-            for (column in 0..1) {
+            layoutPage.columns.forEachIndexed { column, lines ->
                 val left = MARGIN + column * (columnWidth + columnGap)
                 var y = top
-                while (index < entries.size) {
-                    val (label, count) = entries[index]
-                    val isGroup = count < 0
-                    val needed = if (isGroup) rowHeight + 6 else rowHeight
-                    // Never leave a group title alone at the bottom of a column.
-                    if (y + needed + (if (isGroup) rowHeight else 0f) > bottom) break
-                    if (isGroup) {
-                        if (y > top) y += 6
-                        c.drawText(label.uppercase(Locale.ITALIAN), left, y + 14, groupPaint)
-                        c.drawLine(left, y + 19, left + columnWidth, y + 19, rule)
-                        y += rowHeight
-                    } else {
-                        c.drawRoundRect(RectF(left + 1, y + 4, left + 12, y + 15), 2.5f, 2.5f, box)
-                        val countText = "×$count"
-                        val nameWidth = columnWidth - 22 - countPaint.measureText(countText) - 8
-                        c.drawText(wrap(label, namePaint, nameWidth, 1).first(), left + 20, y + 14, namePaint)
-                        c.drawText(countText, left + columnWidth, y + 14, countPaint)
-                        c.drawLine(left + 20, y + rowHeight - 1, left + columnWidth, y + rowHeight - 1, rule)
-                        y += rowHeight
+                lines.forEach { line ->
+                    when (line) {
+                        is PdfLine.Heading -> {
+                            if (y > top) y += sectionGap
+                            val text = line.text.uppercase(Locale.ITALIAN)
+                            c.drawText(text, left, y + 16, headingPaint)
+                            if (line.continued) {
+                                c.drawText("(segue)", left + headingPaint.measureText(text) + 6, y + 16, continuedPaint)
+                            }
+                            c.drawLine(left, y + 21, left + columnWidth, y + 21, headingRule)
+                            y += headingHeight
+                        }
+                        is PdfLine.Item -> {
+                            c.drawRoundRect(RectF(left + 1, y + 4, left + 12, y + 15), 2.5f, 2.5f, box)
+                            val countText = if (includeCounts) "×${line.item.count}" else ""
+                            val nameWidth = columnWidth - 22 - (if (includeCounts) countPaint.measureText(countText) + 8 else 0f)
+                            c.drawText(wrap(line.item.name, namePaint, nameWidth, 1).first(), left + 20, y + 14, namePaint)
+                            if (includeCounts) c.drawText(countText, left + columnWidth, y + 14, countPaint)
+                            c.drawLine(left + 20, y + itemHeight - 1, left + columnWidth, y + itemHeight - 1, rule)
+                            y += itemHeight
+                        }
                     }
-                    index++
                 }
             }
-            footer(c, width, height, palette, if (pageNumber > 1 || index < entries.size) "Pagina $pageNumber" else "")
+            footer(c, width, height, palette, if (pages.size > 1) "Pagina ${pageIndex + 1} di ${pages.size}" else "")
             doc.finishPage(page)
-        } while (index < entries.size)
+        }
 
         doc.writeTo(out)
         doc.close()
@@ -219,7 +242,11 @@ object PdfExporter {
     /** Coloured title band; returns the y where content starts. */
     private fun header(c: Canvas, width: Int, palette: PdfPalette, title: String, subtitle: String): Float {
         val band = RectF(MARGIN, MARGIN, width - MARGIN, MARGIN + 54)
-        c.drawRoundRect(band, 12f, 12f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = palette.accent })
+        val bandPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = palette.accent
+            if (!palette.solidHeader) { style = Paint.Style.STROKE; strokeWidth = 1.5f }
+        }
+        c.drawRoundRect(band, 12f, 12f, bandPaint)
         c.drawText(title, band.left + 18, band.top + 34, paint(palette.onAccent, 20f, bold))
         val sub = paint(palette.onAccent, 11.5f).apply { textAlign = Paint.Align.RIGHT }
         c.drawText(subtitle, band.right - 18, band.top + 33, sub)

@@ -63,6 +63,7 @@ fun SpesamiApp(vm: AppViewModel) {
         PdfTheme.APP -> if (dark) PdfPalette.Dracula else PdfPalette.Light
         PdfTheme.LIGHT -> PdfPalette.Light
         PdfTheme.DRACULA -> PdfPalette.Dracula
+        PdfTheme.INK_SAVER -> PdfPalette.InkSaver
     }
 
     val activity = LocalContext.current as ComponentActivity
@@ -82,6 +83,7 @@ fun SpesamiApp(vm: AppViewModel) {
 
             var tab by rememberSaveable { mutableStateOf(Tab.PLAN) }
             var showIngredients by rememberSaveable { mutableStateOf(false) }
+            var showCategories by rememberSaveable { mutableStateOf(false) }
             var editing by remember { mutableStateOf<RecipeEditRequest?>(null) }
             val snackbar = remember { SnackbarHostState() }
             LaunchedEffect(Unit) { vm.messages.collect { snackbar.showSnackbar(it) } }
@@ -99,7 +101,8 @@ fun SpesamiApp(vm: AppViewModel) {
                     onDelete = editRequest.recipe?.let { r -> { vm.deleteRecipe(r.id); editing = null } },
                     onClose = { editing = null },
                 )
-                showIngredients -> IngredientsScreen(vm, current) { showIngredients = false }
+                showCategories -> CategoriesScreen(vm, current) { showCategories = false }
+                showIngredients -> IngredientsScreen(vm, current, onBack = { showIngredients = false }, onOpenCategories = { showCategories = true })
                 else -> Scaffold(
                     snackbarHost = { SnackbarHost(snackbar) },
                     bottomBar = {
@@ -120,7 +123,7 @@ fun SpesamiApp(vm: AppViewModel) {
                             Tab.PLAN -> PlanScreen(vm, current, week, pdfPalette) { editing = it }
                             Tab.RECIPES -> RecipesScreen(current, { editing = it }, { showIngredients = true })
                             Tab.SHOPPING -> ShoppingScreen(vm, current, week, prefs, pdfPalette)
-                            Tab.MORE -> SettingsScreen(vm, current, prefs) { showIngredients = true }
+                            Tab.MORE -> SettingsScreen(vm, current, prefs, { showIngredients = true }, { showCategories = true })
                         }
                     }
                 }

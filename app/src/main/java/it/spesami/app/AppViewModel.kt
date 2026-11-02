@@ -9,7 +9,6 @@ import it.spesami.app.data.SpesamiDatabase
 import it.spesami.core.AppData
 import it.spesami.core.Backup
 import it.spesami.core.BackupReadResult
-import it.spesami.core.Category
 import it.spesami.core.MealType
 import it.spesami.core.Weeks
 import kotlinx.coroutines.Dispatchers
@@ -112,6 +111,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // --- Ingredients ---
 
+    private fun report(change: Repository.CategoryChange) {
+        if (change is Repository.CategoryChange.Conflict) message(change.message)
+    }
+
     private fun report(change: Repository.IngredientChange) {
         when (change) {
             Repository.IngredientChange.Done -> Unit
@@ -120,7 +123,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun updateIngredient(id: Long, name: String, category: Category?) = write { report(updateIngredient(id, name, category)) }
+    fun renameIngredient(id: Long, name: String) = write { report(renameIngredient(id, name)) }
+
+    fun setIngredientCategory(id: Long, categoryId: Long?) = write { setIngredientCategory(id, categoryId) }
 
     fun addAlias(id: Long, alias: String) = write { report(addAlias(id, alias)) }
 
@@ -129,6 +134,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun mergeIngredient(sourceId: Long, targetId: Long) = write { mergeIngredient(sourceId, targetId) }
 
     fun deleteIngredient(id: Long) = write { deleteIngredient(id) }
+
+    // --- Shopping categories ---
+
+    fun createCategory(name: String) = write { report(createCategory(name)) }
+
+    fun renameCategory(id: Long, name: String) = write { report(renameCategory(id, name)) }
+
+    fun moveCategory(id: Long, delta: Int) = write { moveCategory(id, delta) }
+
+    fun deleteCategory(id: Long) = write { report(deleteCategory(id)) }
 
     // --- Preferences ---
 

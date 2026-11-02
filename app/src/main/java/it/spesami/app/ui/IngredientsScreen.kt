@@ -25,8 +25,7 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -49,10 +48,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import it.spesami.app.AppViewModel
 import it.spesami.core.AppData
-import it.spesami.core.Category
+import it.spesami.core.DefaultCategories
 import it.spesami.core.Ingredient
 import java.text.Collator
 import java.util.Locale
@@ -62,13 +64,16 @@ private val italian: Collator = Collator.getInstance(Locale.ITALIAN).apply { str
 /** Canonical ingredients, their categories and aliases: what makes "patata" and "Patate" one shopping item. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun IngredientsScreen(vm: AppViewModel, data: AppData, onBack: () -> Unit) {
+fun IngredientsScreen(vm: AppViewModel, data: AppData, onBack: () -> Unit, onOpenCategories: () -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
+    var onlyUnclassified by rememberSaveable { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Long?>(null) }
     val aliasesById = data.aliases.groupBy { it.ingredientId }
     val usage = data.recipes.flatMap { it.ingredientIds }.groupingBy { it }.eachCount()
     val q = query.trim()
+    val unclassifiedCount = data.ingredients.count { data.categoryOf(it) == null }
     val list = data.ingredients
+        .filter { i -> !onlyUnclassified || data.categoryOf(i) == null }
         .filter { i -> q.isEmpty() || i.name.contains(q, true) || aliasesById[i.id].orEmpty().any { it.alias.contains(q, true) } }
         .sortedWith { a, b -> italian.compare(a.name, b.name) }
 
@@ -78,6 +83,7 @@ fun IngredientsScreen(vm: AppViewModel, data: AppData, onBack: () -> Unit) {
             TopAppBar(
                 title = { Text("Ingredienti e alias") },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Indietro") } },
+                actions = { TextButton(onClick = onOpenCategories) { Text("Categorie") } },
             )
         },
     ) { padding ->
@@ -90,19 +96,39 @@ fun IngredientsScreen(vm: AppViewModel, data: AppData, onBack: () -> Unit) {
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             )
+            if (unclassifiedCount > 0 || onlyUnclassified) {
+                FilterChip(
+                    selected = onlyUnclassified,
+                    onClick = { onlyUnclassified = !onlyUnclassified },
+                    label = { Text("${DefaultCategories.UNCLASSIFIED_LABEL} ($unclassifiedCount)") },
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+            }
             LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
                 if (data.ingredients.isEmpty()) {
                     item { EmptyState("Nessun ingrediente", "Gli ingredienti vengono creati automaticamente quando li aggiungi a una ricetta.") }
                 }
                 items(list, key = { it.id }) { ingredient ->
                     val aliases = aliasesById[ingredient.id].orEmpty()
-                    val details = listOfNotNull(
-                        ingredient.category?.label,
-                        aliases.takeIf { it.isNotEmpty() }?.joinToString(", ", prefix = "anche: ") { it.alias },
-                    ).joinToString(" · ")
+                    val category = data.categoryOf(ingredient)
+                    val categoryLabel = when {
+                        category == null -> DefaultCategories.UNCLASSIFIED_LABEL
+                        ingredient.categoryManual -> category.name
+                        else -> "${category.name} (automatica)"
+                    }
+                    val aliasText = aliases.takeIf { it.isNotEmpty() }?.joinToString(", ", prefix = " · anche: ") { it.alias }.orEmpty()
                     ListItem(
                         headlineContent = { Text(ingredient.name) },
-                        supportingContent = if (details.isEmpty()) null else { { Text(details) } },
+                        supportingContent = {
+                            Text(
+                                buildAnnotatedString {
+                                    withStyle(SpanStyle(color = if (category == null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)) {
+                                        append(categoryLabel)
+                                    }
+                                    append(aliasText)
+                                }
+                            )
+                        },
                         trailingContent = {
                             val n = usage[ingredient.id] ?: 0
                             Text(if (n == 1) "1 ricetta" else "$n ricette", style = MaterialTheme.typography.labelMedium)
@@ -126,7 +152,7 @@ fun IngredientsScreen(vm: AppViewModel, data: AppData, onBack: () -> Unit) {
 @Composable
 private fun IngredientDialog(vm: AppViewModel, data: AppData, ingredient: Ingredient, usedBy: Int, onClose: () -> Unit) {
     var name by remember(ingredient.id) { mutableStateOf(ingredient.name) }
-    var category by remember(ingredient.id) { mutableStateOf(ingredient.category) }
+    var categoryId by remember(ingredient.id) { mutableStateOf(data.categoryOf(ingredient)?.id) }
     var alias by remember(ingredient.id) { mutableStateOf("") }
     var categoryMenu by remember { mutableStateOf(false) }
     var merging by remember { mutableStateOf(false) }
@@ -139,17 +165,23 @@ private fun IngredientDialog(vm: AppViewModel, data: AppData, ingredient: Ingred
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Nome") }, singleLine = true)
+                Text("Categoria della spesa", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                 Box {
                     OutlinedButton(onClick = { categoryMenu = true }, modifier = Modifier.fillMaxWidth()) {
-                        Text(category?.label ?: "Nessuna categoria", Modifier.weight(1f))
+                        Text(categoryId?.let { data.categoriesById[it]?.name } ?: DefaultCategories.UNCLASSIFIED_LABEL, Modifier.weight(1f))
                         Icon(Icons.Default.ArrowDropDown, null)
                     }
-                    DropdownMenu(expanded = categoryMenu, onDismissRequest = { categoryMenu = false }) {
-                        DropdownMenuItem(text = { Text("Nessuna categoria") }, onClick = { category = null; categoryMenu = false })
-                        Category.entries.forEach { c ->
-                            DropdownMenuItem(text = { Text(c.label) }, onClick = { category = c; categoryMenu = false })
-                        }
+                    CategoryMenu(categoryMenu, data, categoryId, onDismiss = { categoryMenu = false }) {
+                        categoryId = it
+                        categoryMenu = false
                     }
+                }
+                if (!ingredient.categoryManual && ingredient.categoryId != null) {
+                    Text(
+                        "Categoria assegnata automaticamente. Se la cambi, la tua scelta non verrà più modificata.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
                 Text("Alias", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                 Text(
@@ -192,7 +224,8 @@ private fun IngredientDialog(vm: AppViewModel, data: AppData, ingredient: Ingred
             TextButton(
                 enabled = name.isNotBlank(),
                 onClick = {
-                    if (name != ingredient.name || category != ingredient.category) vm.updateIngredient(ingredient.id, name, category)
+                    if (name.trim() != ingredient.name) vm.renameIngredient(ingredient.id, name)
+                    if (categoryId != data.categoryOf(ingredient)?.id) vm.setIngredientCategory(ingredient.id, categoryId)
                     onClose()
                 },
             ) { Text("Salva") }

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -30,6 +31,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import it.spesami.core.AppData
+import it.spesami.core.DefaultCategories
 import it.spesami.core.Weeks
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -122,5 +125,36 @@ fun EmptyState(title: String, body: String, modifier: Modifier = Modifier) {
     ) {
         Text(title, style = MaterialTheme.typography.titleMedium)
         Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** Dropdown for choosing an ingredient's shopping category; null = "Da classificare". */
+@Composable
+fun CategoryMenu(
+    expanded: Boolean,
+    data: AppData,
+    selected: Long?,
+    onDismiss: () -> Unit,
+    onSelect: (Long?) -> Unit,
+) {
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        data.sortedCategories.forEach { c ->
+            DropdownMenuItem(
+                text = { Text(c.name, fontWeight = if (c.id == selected) FontWeight.Bold else null) },
+                trailingIcon = if (c.id == selected) { { Icon(Icons.Default.Check, null) } } else null,
+                onClick = { onSelect(c.id) },
+            )
+        }
+        DropdownMenuItem(
+            text = {
+                Text(
+                    DefaultCategories.UNCLASSIFIED_LABEL,
+                    color = MaterialTheme.colorScheme.error,
+                    fontWeight = if (selected == null) FontWeight.Bold else null,
+                )
+            },
+            trailingIcon = if (selected == null) { { Icon(Icons.Default.Check, null) } } else null,
+            onClick = { onSelect(null) },
+        )
     }
 }

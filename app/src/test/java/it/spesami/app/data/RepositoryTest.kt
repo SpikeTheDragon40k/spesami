@@ -2,7 +2,6 @@ package it.spesami.app.data
 
 import it.spesami.core.Backup
 import it.spesami.core.BackupReadResult
-import it.spesami.core.Category
 import it.spesami.core.MealType
 import it.spesami.core.ShoppingList
 import org.junit.After
@@ -71,9 +70,9 @@ class RepositoryTest {
     fun renameRejectsCollisions() {
         repo.saveRecipe(null, "X", "", listOf("Carote", "Zucchine"))
         val carote = repo.load().ingredients.single { it.name == "Carote" }
-        assertTrue(repo.updateIngredient(carote.id, "zucchine", null) is Repository.IngredientChange.Conflict)
-        assertEquals(Repository.IngredientChange.Done, repo.updateIngredient(carote.id, "Carote", Category.PRODUCE))
-        assertEquals(Category.PRODUCE, repo.load().ingredientsById[carote.id]?.category)
+        assertTrue(repo.renameIngredient(carote.id, "zucchine") is Repository.IngredientChange.Conflict)
+        assertEquals(Repository.IngredientChange.Done, repo.renameIngredient(carote.id, "Carote viola"))
+        assertEquals("Carote viola", repo.load().ingredientsById[carote.id]?.name)
     }
 
     @Test

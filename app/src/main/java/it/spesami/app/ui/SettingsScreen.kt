@@ -37,7 +37,7 @@ import java.time.LocalDate
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(vm: AppViewModel, data: AppData, prefs: Preferences, onOpenIngredients: () -> Unit) {
+fun SettingsScreen(vm: AppViewModel, data: AppData, prefs: Preferences, onOpenIngredients: () -> Unit, onOpenCategories: () -> Unit) {
     val saveBackup = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) vm.exportBackup(uri)
     }
@@ -58,10 +58,19 @@ fun SettingsScreen(vm: AppViewModel, data: AppData, prefs: Preferences, onOpenIn
                 RadioRow(theme.label, prefs.pdfTheme == theme) { vm.setPreference(Preferences.PDF_THEME, theme.name) }
             }
 
-            SectionTitle("Ingredienti")
+            SectionTitle("Ingredienti e categorie")
+            ListItem(
+                headlineContent = { Text("Categorie della spesa") },
+                supportingContent = { Text("${data.categories.size} categorie: crea, rinomina, riordina, elimina") },
+                trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) },
+                modifier = Modifier.clickable(onClick = onOpenCategories),
+            )
             ListItem(
                 headlineContent = { Text("Ingredienti e alias") },
-                supportingContent = { Text("${data.ingredients.size} ingredienti, ${data.aliases.size} alias, categorie") },
+                supportingContent = {
+                    val unclassified = data.ingredients.count { data.categoryOf(it) == null }
+                    Text("${data.ingredients.size} ingredienti, ${data.aliases.size} alias" + if (unclassified > 0) ", $unclassified da classificare" else "")
+                },
                 trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) },
                 modifier = Modifier.clickable(onClick = onOpenIngredients),
             )
@@ -69,7 +78,7 @@ fun SettingsScreen(vm: AppViewModel, data: AppData, prefs: Preferences, onOpenIn
             SectionTitle("Backup")
             ListItem(
                 headlineContent = { Text("Esporta backup") },
-                supportingContent = { Text("Salva ricette, ingredienti, alias, piani e preferenze in un file JSON") },
+                supportingContent = { Text("Salva ricette, ingredienti, categorie, alias, piani e preferenze in un file JSON") },
                 modifier = Modifier.clickable { saveBackup.launch("spesami-backup-${LocalDate.now()}.json") },
             )
             ListItem(
@@ -87,7 +96,7 @@ fun SettingsScreen(vm: AppViewModel, data: AppData, prefs: Preferences, onOpenIn
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
             Text(
-                "Versione 1.0.0",
+                "Versione 1.1.0",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(16.dp),

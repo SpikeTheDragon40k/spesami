@@ -3,13 +3,15 @@ package it.spesami.app.data
 import android.content.ContentValues
 import android.database.sqlite.SQLiteDatabase
 import it.spesami.core.AppData
-import it.spesami.core.Category
+import it.spesami.core.DefaultCategories
 import it.spesami.core.Ingredient
 import it.spesami.core.IngredientAlias
+import it.spesami.core.IngredientDictionary
 import it.spesami.core.IngredientNames
 import it.spesami.core.MealSlot
 import it.spesami.core.MealType
 import it.spesami.core.Recipe
+import it.spesami.core.ShoppingCategory
 import java.time.LocalDate
 
 /** All reads and writes of the local database. Call from a background thread. */
@@ -17,11 +19,13 @@ class Repository(private val helper: SpesamiDatabase) {
     private val db: SQLiteDatabase get() = helper.writableDatabase
 
     fun load(): AppData {
-        val ingredients = db.rawQuery("SELECT id, name, category FROM ingredient", null).use { c ->
+        val categories = db.rawQuery("SELECT id, name, position, builtin_key FROM shopping_category ORDER BY position, id", null).use { c ->
+            buildList { while (c.moveToNext()) add(ShoppingCategory(c.getLong(0), c.getString(1), c.getInt(2), c.getString(3))) }
+        }
+        val ingredients = db.rawQuery("SELECT id, name, category_id, category_manual FROM ingredient", null).use { c ->
             buildList {
                 while (c.moveToNext()) {
-                    val category = c.getString(2)?.let { name -> Category.entries.firstOrNull { it.name == name } }
-                    add(Ingredient(c.getLong(0), c.getString(1), category))
+                    add(Ingredient(c.getLong(0), c.getString(1), if (c.isNull(2)) null else c.getLong(2), c.getInt(3) != 0))
                 }
             }
         }
@@ -51,7 +55,7 @@ class Repository(private val helper: SpesamiDatabase) {
         val preferences = db.rawQuery("SELECT key, value FROM preference", null).use { c ->
             buildMap { while (c.moveToNext()) put(c.getString(0), c.getString(1)) }
         }
-        return AppData(ingredients, aliases, recipes, slots, preferences)
+        return AppData(ingredients, aliases, recipes, slots, categories, preferences)
     }
 
     // --- Recipes ---
@@ -123,11 +127,13 @@ class Repository(private val helper: SpesamiDatabase) {
         data class Conflict(val message: String) : IngredientChange
     }
 
-    fun updateIngredient(id: Long, name: String, category: Category?): IngredientChange = inTransaction {
+    /** Renames an ingredient. An automatically classified one is re-classified for its new name. */
+    fun renameIngredient(id: Long, name: String): IngredientChange = inTransaction {
         val key = IngredientNames.key(name)
         val other = ingredientIdByKey(key)
         val aliasOwner = aliasOwnerByKey(key)
         when {
+            key.isEmpty() -> IngredientChange.Done
             other != null && other != id -> IngredientChange.Conflict("Esiste già un ingrediente \"${IngredientNames.clean(name)}\". Usa \"Unisci\".")
             aliasOwner != null && aliasOwner != id -> IngredientChange.Conflict("\"${IngredientNames.clean(name)}\" è già un alias di un altro ingrediente.")
             else -> {
@@ -136,11 +142,20 @@ class Repository(private val helper: SpesamiDatabase) {
                 db.update("ingredient", ContentValues().apply {
                     put("name", IngredientNames.clean(name))
                     put("name_key", key)
-                    put("category", category?.name)
                 }, "id = ?", arrayOf(id.toString()))
+                db.update("ingredient", ContentValues().apply { put("category_id", suggestedCategoryId(name)) },
+                    "id = ? AND category_manual = 0", arrayOf(id.toString()))
                 IngredientChange.Done
             }
         }
+    }
+
+    /** The user's choice ([categoryId] null = "Da classificare"): marked manual, never auto-changed again. */
+    fun setIngredientCategory(id: Long, categoryId: Long?) {
+        db.update("ingredient", ContentValues().apply {
+            put("category_id", categoryId)
+            put("category_manual", 1)
+        }, "id = ?", arrayOf(id.toString()))
     }
 
     /**
@@ -180,12 +195,79 @@ class Repository(private val helper: SpesamiDatabase) {
             arrayOf(targetId, sourceId),
         )
         db.execSQL("UPDATE ingredient_alias SET ingredient_id = ? WHERE ingredient_id = ?", arrayOf(targetId, sourceId))
+        // A target without any category (and no explicit choice) takes the source's.
+        db.execSQL(
+            "UPDATE ingredient SET category_id = (SELECT category_id FROM ingredient WHERE id = ?), " +
+                "category_manual = (SELECT category_manual FROM ingredient WHERE id = ?) " +
+                "WHERE id = ? AND category_id IS NULL AND category_manual = 0",
+            arrayOf(sourceId, sourceId, targetId),
+        )
         db.delete("ingredient", "id = ?", src) // cascades the remaining recipe_ingredient rows
         insertAlias(targetId, sourceName)
     }
 
     fun deleteIngredient(id: Long) {
         db.delete("ingredient", "id = ?", arrayOf(id.toString()))
+    }
+
+    // --- Shopping categories ---
+
+    sealed interface CategoryChange {
+        data object Done : CategoryChange
+        data class Conflict(val message: String) : CategoryChange
+    }
+
+    /** Adds a category just before "Altro" (or at the end if "Altro" was moved). */
+    fun createCategory(name: String): CategoryChange = inTransaction {
+        val clean = name.trim()
+        if (clean.isEmpty()) return@inTransaction CategoryChange.Done
+        if (categoryIdByKey(IngredientNames.key(clean)) != null) return@inTransaction CategoryChange.Conflict("Esiste già la categoria \"$clean\".")
+        val ordered = orderedCategoryIds()
+        val other = otherCategoryId()
+        val insertAt = if (other != null && ordered.lastOrNull() == other) ordered.size - 1 else ordered.size
+        val id = db.insertOrThrow("shopping_category", null, ContentValues().apply {
+            put("name", clean)
+            put("name_key", IngredientNames.key(clean))
+            put("position", insertAt)
+        })
+        writePositions(ordered.toMutableList().apply { add(insertAt, id) })
+        CategoryChange.Done
+    }
+
+    fun renameCategory(id: Long, name: String): CategoryChange = inTransaction {
+        val clean = name.trim()
+        val other = categoryIdByKey(IngredientNames.key(clean))
+        when {
+            clean.isEmpty() -> CategoryChange.Done
+            other != null && other != id -> CategoryChange.Conflict("Esiste già la categoria \"$clean\".")
+            else -> {
+                db.update("shopping_category", ContentValues().apply {
+                    put("name", clean)
+                    put("name_key", IngredientNames.key(clean))
+                }, "id = ?", arrayOf(id.toString()))
+                CategoryChange.Done
+            }
+        }
+    }
+
+    /** Moves a category [delta] places up (negative) or down in the list order. */
+    fun moveCategory(id: Long, delta: Int) = inTransaction {
+        val ordered = orderedCategoryIds().toMutableList()
+        val from = ordered.indexOf(id)
+        if (from < 0) return@inTransaction
+        val to = (from + delta).coerceIn(0, ordered.lastIndex)
+        ordered.add(to, ordered.removeAt(from))
+        writePositions(ordered)
+    }
+
+    /** Deletes a category; its ingredients move to "Altro", which itself cannot be deleted. */
+    fun deleteCategory(id: Long): CategoryChange = inTransaction {
+        val other = otherCategoryId()
+        if (other == null || other == id) return@inTransaction CategoryChange.Conflict("La categoria \"Altro\" non può essere eliminata.")
+        db.execSQL("UPDATE ingredient SET category_id = ? WHERE category_id = ?", arrayOf(other, id))
+        db.delete("shopping_category", "id = ?", arrayOf(id.toString()))
+        writePositions(orderedCategoryIds())
+        CategoryChange.Done
     }
 
     // --- Preferences ---
@@ -201,16 +283,26 @@ class Repository(private val helper: SpesamiDatabase) {
 
     /** Replaces all local data with [data] (already validated) in one transaction. */
     fun replaceAll(data: AppData) = inTransaction {
-        listOf("meal_slot", "recipe_ingredient", "recipe", "ingredient_alias", "ingredient", "preference").forEach {
+        listOf("meal_slot", "recipe_ingredient", "recipe", "ingredient_alias", "ingredient", "shopping_category", "preference").forEach {
             db.delete(it, null, null)
         }
         db.execSQL("DELETE FROM sqlite_sequence")
+        data.categories.forEach {
+            db.insertOrThrow("shopping_category", null, ContentValues().apply {
+                put("id", it.id)
+                put("name", it.name)
+                put("name_key", IngredientNames.key(it.name))
+                put("position", it.position)
+                put("builtin_key", it.builtinKey)
+            })
+        }
         data.ingredients.forEach {
             db.insertOrThrow("ingredient", null, ContentValues().apply {
                 put("id", it.id)
                 put("name", it.name)
                 put("name_key", IngredientNames.key(it.name))
-                put("category", it.category?.name)
+                put("category_id", it.categoryId)
+                put("category_manual", if (it.categoryManual) 1 else 0)
             })
         }
         data.aliases.forEach { insertAlias(it.ingredientId, it.alias) }
@@ -239,7 +331,31 @@ class Repository(private val helper: SpesamiDatabase) {
         return ingredientIdByKey(key) ?: aliasOwnerByKey(key) ?: db.insertOrThrow("ingredient", null, ContentValues().apply {
             put("name", IngredientNames.clean(name))
             put("name_key", key)
+            put("category_id", suggestedCategoryId(name)) // automatic, only for unambiguous dictionary matches
         })
+    }
+
+    /** The dictionary's category for [name], if that default category still exists. */
+    private fun suggestedCategoryId(name: String): Long? =
+        IngredientDictionary.suggest(name)?.let { key ->
+            db.rawQuery("SELECT id FROM shopping_category WHERE builtin_key = ?", arrayOf(key)).use { if (it.moveToFirst()) it.getLong(0) else null }
+        }
+
+    private fun otherCategoryId(): Long? =
+        db.rawQuery("SELECT id FROM shopping_category WHERE builtin_key = ?", arrayOf(DefaultCategories.OTHER)).use { if (it.moveToFirst()) it.getLong(0) else null }
+
+    private fun categoryIdByKey(key: String): Long? =
+        db.rawQuery("SELECT id FROM shopping_category WHERE name_key = ?", arrayOf(key)).use { if (it.moveToFirst()) it.getLong(0) else null }
+
+    private fun orderedCategoryIds(): List<Long> =
+        db.rawQuery("SELECT id FROM shopping_category ORDER BY position, id", null).use { c ->
+            buildList { while (c.moveToNext()) add(c.getLong(0)) }
+        }
+
+    private fun writePositions(ordered: List<Long>) {
+        ordered.forEachIndexed { position, id ->
+            db.update("shopping_category", ContentValues().apply { put("position", position) }, "id = ?", arrayOf(id.toString()))
+        }
     }
 
     private fun insertAlias(ingredientId: Long, alias: String) {
