@@ -1,6 +1,6 @@
 # Spesami — Informativa sulla privacy / Privacy policy
 
-*Ultimo aggiornamento / Last updated: 2026-11-03*
+*Ultimo aggiornamento / Last updated: 2026-11-03 (Spesami 1.4.0)*
 
 ## Italiano
 
@@ -16,8 +16,10 @@ Altro → Sincronizzazione. Se la attivi:
 - l'app chiede solo il permesso `drive.appdata`, cioè una cartella nascosta di Google Drive riservata a Spesami.
   Non può vedere né modificare gli altri file del tuo Drive;
 - in quella cartella ogni telefono salva un proprio file con piano, ricette, ingredienti e alias, categorie, stato
-  della lista della spesa e prodotti aggiunti a mano, più un identificativo casuale del dispositivo;
-- le impostazioni del singolo telefono (tema, stile PDF, schermo acceso) non vengono sincronizzate;
+  della lista della spesa e prodotti aggiunti a mano, più il nome del telefono (per esempio «Pixel 8», per
+  l'elenco dei dispositivi) e un identificativo casuale del dispositivo;
+- le impostazioni del singolo telefono (tema, stile PDF, opzioni di esportazione, schermo acceso) non vengono
+  sincronizzate;
 - i dati vanno solo da Google Drive ai telefoni collegati allo stesso account Google. Non passano da server nostri
   e non vengono condivisi con nessun altro;
 - l'accesso è gestito da Google Play Services; l'app non salva password né token in chiaro.
@@ -45,8 +47,9 @@ it on:
 - the app requests only the `drive.appdata` scope: a hidden Google Drive folder reserved for Spesami. It cannot
   see or change any other file in your Drive;
 - in that folder each phone stores its own file with the plan, recipes, ingredients and aliases, categories,
-  shopping checklist state and hand-added products, plus a random device identifier;
-- per-phone settings (theme, PDF style, keep screen on) are not synced;
+  shopping checklist state and hand-added products, plus the phone's name (e.g. "Pixel 8", for the list of
+  devices) and a random device identifier;
+- per-phone settings (theme, PDF style, export options, keep screen on) are not synced;
 - data travels only between Google Drive and the phones connected to the same Google account. It never goes
   through a server of ours and is not shared with anyone else;
 - authorization is handled by Google Play services; the app never stores passwords or tokens in plain text.
