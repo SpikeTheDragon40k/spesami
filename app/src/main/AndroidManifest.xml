@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Offline-only: no INTERNET permission. Data leaves the device only through user-initiated
-     sharing (share sheet, clipboard) or files the user saves through the Storage Access Framework. -->
+<!-- Works fully offline. INTERNET is used only by the optional Google Drive sync, which is off until the user
+     taps "Connetti" and talks only to www.googleapis.com (see DriveClient). Otherwise data leaves the device only
+     through user-initiated sharing (share sheet, clipboard) or files saved through the Storage Access Framework. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <!-- allowBackup=false: no automatic Google cloud backup or device transfer; backups are manual JSON files. -->
     <application
