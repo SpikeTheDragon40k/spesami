@@ -163,12 +163,17 @@ class DriveClient(private val http: HttpTransport, private val tokens: TokenProv
     }
 }
 
+/** Where the device files are exchanged: Google Drive in the app, a map in tests. Blocking: call off the main thread. */
+fun interface SyncExchange {
+    fun sync(local: LocalSync, current: Snapshot, deviceName: String, appVersion: String, now: Long): SyncResult
+}
+
 /**
  * One sync through Drive: read every other device's file, merge ([Sync.run]), write this device's file.
  * Each device writes only `device-<itsId>.json`; it never modifies or deletes another device's file.
  */
-class DriveSync(private val drive: DriveClient) {
-    fun sync(local: LocalSync, current: Snapshot, deviceName: String, appVersion: String, now: Long): SyncResult {
+class DriveSync(private val drive: DriveClient) : SyncExchange {
+    override fun sync(local: LocalSync, current: Snapshot, deviceName: String, appVersion: String, now: Long): SyncResult {
         val ownName = SyncFile.fileName(local.deviceId)
         val files = drive.list()
         val peers = files.filter { it.name != ownName && SyncFile.deviceIdOf(it.name) != null }

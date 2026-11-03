@@ -81,8 +81,8 @@ class SpesamiDatabase(context: Context, name: String? = "spesami.db") : SQLiteOp
      *   constraint, which ALTER TABLE cannot add) keeps them unique.
      * - `ingredient_redirect`: "this ingredient was merged into that one", by uid, so other devices can move their
      *   own references too instead of only seeing a deletion.
-     * - `sync_stamp`, `sync_tombstone`, `sync_state`: per-field version stamps, deletions and this device's sync
-     *   state. Never part of JSON backups: a restored backup must not copy one phone's identity to another.
+     * - `sync_state`: this device's sync data (its id, the version stamps and deletions it knows, status). Never
+     *   part of JSON backups: a restored backup must not copy one phone's identity to another.
      */
     private fun migrateTo4(db: SQLiteDatabase) {
         for (table in UID_TABLES) {
@@ -98,8 +98,6 @@ class SpesamiDatabase(context: Context, name: String? = "spesami.db") : SQLiteOp
             db.execSQL("CREATE UNIQUE INDEX ${table}_uid ON $table(uid)")
         }
         db.execSQL("CREATE TABLE ingredient_redirect (from_uid TEXT PRIMARY KEY, to_uid TEXT NOT NULL)")
-        db.execSQL("CREATE TABLE sync_stamp (uid TEXT NOT NULL, field TEXT NOT NULL, hlc TEXT NOT NULL, PRIMARY KEY (uid, field))")
-        db.execSQL("CREATE TABLE sync_tombstone (uid TEXT PRIMARY KEY, hlc TEXT NOT NULL)")
         db.execSQL("CREATE TABLE sync_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
     }
 

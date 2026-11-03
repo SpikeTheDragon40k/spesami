@@ -129,7 +129,7 @@ class MigrationTo4Test {
     fun syncTablesStartEmptyAndUidsStayUnique() {
         val helper = SpesamiDatabase(context, name)
         val db = helper.writableDatabase
-        for (table in listOf("ingredient_redirect", "sync_stamp", "sync_tombstone", "sync_state")) {
+        for (table in listOf("ingredient_redirect", "sync_state")) {
             assertEquals(table, 0, db.rawQuery("SELECT COUNT(*) FROM $table", null).use { it.moveToFirst(); it.getInt(0) })
         }
         val existing = db.rawQuery("SELECT uid FROM recipe WHERE id = 3", null).use { it.moveToFirst(); it.getString(0) }

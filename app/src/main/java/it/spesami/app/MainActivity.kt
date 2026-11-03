@@ -15,4 +15,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent { SpesamiApp(vm) }
     }
+
+    override fun onStart() {
+        super.onStart()
+        vm.onStart()
+    }
 }

@@ -6,6 +6,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import it.spesami.app.data.Repository
 import it.spesami.app.data.SpesamiDatabase
+import it.spesami.app.sync.SyncEngine
+import it.spesami.app.sync.SyncManager
 import it.spesami.core.AppData
 import it.spesami.core.Backup
 import it.spesami.core.BackupReadResult
@@ -56,9 +58,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _restore = MutableStateFlow<RestoreState?>(null)
     val restore: StateFlow<RestoreState?> = _restore.asStateFlow()
 
+    private val syncEngine = SyncEngine(repository, java.io.File(app.filesDir, "backups"))
+
+    /** Optional Google Drive sync; off until the user connects. Applying merged data reloads the screen. */
+    val sync = SyncManager(app, syncEngine, io, viewModelScope, onApplied = { _data.value = repository.load() })
+
     init {
         write { }
     }
+
+    /** The screen became visible: the app was opened or came back to the foreground. Syncs if connected. */
+    fun onStart() = sync.requestSync()
 
     fun message(text: String) {
         _messages.tryEmit(text)
@@ -83,6 +93,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 try {
                     repository.block()
                 } finally {
+                    runCatching { sync.onLocalChange() } // stamps the edit for sync (and schedules one if connected)
                     if (pendingWrites.decrementAndGet() == 0) _data.value = repository.load()
                 }
             }
@@ -242,9 +253,25 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _restore.value = null
         viewModelScope.launch {
             val ok = withContext(io) {
-                runCatching { repository.replaceAll(pending.data) }.isSuccess.also { _data.value = repository.load() }
+                runCatching { repository.replaceAll(pending.data) }.isSuccess.also {
+                    runCatching { sync.onLocalChange() }
+                    _data.value = repository.load()
+                }
             }
             message(if (ok) "Backup ripristinato." else "Ripristino non riuscito: i dati locali non sono stati modificati.")
+        }
+    }
+
+    /** Copies the automatic backup made before the first sync to a file the user picked. */
+    fun exportFirstSyncBackup(uri: Uri) {
+        viewModelScope.launch {
+            val ok = withContext(io) {
+                runCatching {
+                    val source = java.io.File(syncEngine.info().firstBackup!!)
+                    getApplication<Application>().contentResolver.openOutputStream(uri, "wt")!!.use { out -> source.inputStream().use { it.copyTo(out) } }
+                }.isSuccess
+            }
+            message(if (ok) "Backup salvato." else "Impossibile salvare il backup.")
         }
     }
 

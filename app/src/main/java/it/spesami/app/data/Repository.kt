@@ -13,6 +13,7 @@ import it.spesami.core.MealType
 import it.spesami.core.Recipe
 import it.spesami.core.ShoppingCategory
 import it.spesami.core.Uids
+import it.spesami.core.sync.Snapshot
 import it.spesami.core.WeekItem
 import java.time.LocalDate
 
@@ -396,6 +397,120 @@ class Repository(private val helper: SpesamiDatabase) {
         data.manualItems.forEach { db.insertOrThrow("shopping_extra", null, weekItem(it.weekStart, it.ingredientId)) }
         data.purchases.forEach { db.insertOrThrow("shopping_purchased", null, weekItem(it.weekStart, it.ingredientId)) }
     }
+
+    // --- Sync ---
+
+    /** The synced part of the data, with the ingredient merges not yet recorded for sync. */
+    fun syncSnapshot(): Snapshot {
+        val redirects = db.rawQuery("SELECT from_uid, to_uid FROM ingredient_redirect", null).use { c ->
+            buildMap { while (c.moveToNext()) put(c.getString(0), c.getString(1)) }
+        }
+        return Snapshot.from(load(), redirects)
+    }
+
+    /** Forgets merges once recorded (or when sync was never set up, where nobody needs them). */
+    fun clearRedirects(fromUids: Collection<String>? = null) {
+        if (fromUids == null) {
+            db.delete("ingredient_redirect", null, null)
+        } else {
+            fromUids.forEach { db.delete("ingredient_redirect", "from_uid = ?", arrayOf(it)) }
+        }
+    }
+
+    /**
+     * Makes the synced data equal to [target], in one transaction, but only if it is still [expected] (nothing was
+     * edited while the sync was talking to Drive); returns false otherwise and changes nothing. Rows are matched by
+     * uid and keep their local ids, so anything referring to them by id (e.g. export settings) stays valid.
+     * Preferences and sync data are not touched.
+     */
+    fun applySnapshot(expected: Snapshot, target: Snapshot): Boolean = inTransaction {
+        if (syncSnapshot() != expected) return@inTransaction false
+        // Fully rewritten below; deleting them first also lets ingredients and recipes go without cascades.
+        listOf("shopping_purchased", "shopping_extra", "meal_slot", "recipe_ingredient", "ingredient_alias").forEach { db.delete(it, null, null) }
+
+        val categoryIds = upsertByUid("shopping_category", target.categories.map { it.uid })
+        target.categories.forEach { c ->
+            db.update("shopping_category", ContentValues().apply {
+                put("name", c.name)
+                put("name_key", IngredientNames.key(c.name))
+                put("position", c.position)
+                put("builtin_key", c.builtinKey)
+            }, "uid = ?", arrayOf(c.uid))
+        }
+
+        val ingredientIds = upsertByUid("ingredient", target.ingredients.map { it.uid })
+        target.ingredients.forEach { i ->
+            db.update("ingredient", ContentValues().apply {
+                put("name", i.name)
+                put("name_key", IngredientNames.key(i.name))
+                put("category_id", i.categoryUid?.let(categoryIds::get))
+                put("category_manual", if (i.categoryManual) 1 else 0)
+            }, "uid = ?", arrayOf(i.uid))
+        }
+
+        val recipeIds = upsertByUid("recipe", target.recipes.map { it.uid })
+        target.recipes.forEach { r ->
+            db.update("recipe", ContentValues().apply {
+                put("name", r.name)
+                put("notes", r.notes)
+            }, "uid = ?", arrayOf(r.uid))
+            r.ingredientUids.mapNotNull(ingredientIds::get).distinct().forEachIndexed { position, ingredientId ->
+                db.insertOrThrow("recipe_ingredient", null, ContentValues().apply {
+                    put("recipe_id", recipeIds.getValue(r.uid))
+                    put("ingredient_id", ingredientId)
+                    put("position", position)
+                })
+            }
+        }
+        target.aliases.forEach { a -> ingredientIds[a.ingredientUid]?.let { insertAlias(it, a.alias, a.uid) } }
+        target.slots.forEach { slot -> recipeIds[slot.recipeUid]?.let { setMeal(slot.weekStart, slot.day, slot.meal, it) } }
+        target.extras.forEach { w -> ingredientIds[w.ingredientUid]?.let { db.insertOrThrow("shopping_extra", null, weekItem(w.weekStart, it)) } }
+        target.purchases.forEach { w -> ingredientIds[w.ingredientUid]?.let { db.insertOrThrow("shopping_purchased", null, weekItem(w.weekStart, it)) } }
+        true
+    }
+
+    /**
+     * Deletes the rows of [table] whose uid is not in [uids], inserts placeholders for new ones, and gives every
+     * row a temporary unique name key so the caller can rename freely (two rows may swap names). Returns
+     * uid -> local id.
+     */
+    private fun upsertByUid(table: String, uids: List<String>): Map<String, Long> {
+        val existing = db.rawQuery("SELECT uid, id FROM $table", null).use { c -> buildMap { while (c.moveToNext()) put(c.getString(0), c.getLong(1)) } }
+        val wanted = uids.toSet()
+        existing.keys.filter { it !in wanted }.forEach { db.delete(table, "uid = ?", arrayOf(it)) }
+        val hasNameKey = table != "recipe"
+        // Real keys are trimmed, so they never start with a space: these temporary ones cannot collide.
+        if (hasNameKey) db.execSQL("UPDATE $table SET name_key = ' ' || uid")
+        val ids = HashMap<String, Long>()
+        uids.forEach { uid ->
+            ids[uid] = existing[uid] ?: db.insertOrThrow(table, null, ContentValues().apply {
+                put("uid", uid)
+                put("name", "")
+                if (hasNameKey) put("name_key", " $uid")
+                if (table == "shopping_category") put("position", 0)
+            })
+        }
+        return ids
+    }
+
+    fun syncValue(key: String): String? =
+        db.rawQuery("SELECT value FROM sync_state WHERE key = ?", arrayOf(key)).use { if (it.moveToFirst()) it.getString(0) else null }
+
+    fun setSyncValue(key: String, value: String?) {
+        if (value == null) {
+            db.delete("sync_state", "key = ?", arrayOf(key))
+        } else {
+            db.insertWithOnConflict("sync_state", null, ContentValues().apply {
+                put("key", key)
+                put("value", value)
+            }, SQLiteDatabase.CONFLICT_REPLACE)
+        }
+    }
+
+    /** Whether there is anything worth backing up before a first sync (more than the seeded categories). */
+    fun hasUserData(): Boolean = db.rawQuery(
+        "SELECT (SELECT COUNT(*) FROM ingredient) + (SELECT COUNT(*) FROM recipe) + (SELECT COUNT(*) FROM shopping_category WHERE builtin_key IS NULL)", null,
+    ).use { it.moveToFirst(); it.getInt(0) > 0 }
 
     // --- Helpers ---
 

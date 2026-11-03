@@ -25,6 +25,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.selection.toggleable
@@ -47,6 +48,7 @@ fun SettingsScreen(vm: AppViewModel, data: AppData, prefs: Preferences, onOpenIn
         if (uri != null) vm.readBackup(uri)
     }
     val restore by vm.restore.collectAsState()
+    val syncStatus by vm.sync.status.collectAsState()
 
     Scaffold(topBar = { TopAppBar(title = { Text("Altro") }) }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())) {
@@ -89,6 +91,8 @@ fun SettingsScreen(vm: AppViewModel, data: AppData, prefs: Preferences, onOpenIn
                 modifier = Modifier.clickable(onClick = onOpenIngredients),
             )
 
+            SyncSection(vm)
+
             SectionTitle("Backup")
             ListItem(
                 headlineContent = { Text("Esporta backup") },
@@ -103,14 +107,17 @@ fun SettingsScreen(vm: AppViewModel, data: AppData, prefs: Preferences, onOpenIn
 
             SectionTitle("Informazioni")
             Text(
-                "Spesami funziona interamente su questo dispositivo: nessun account, nessuna sincronizzazione, " +
-                    "nessuna connessione a Internet. I dati escono dal telefono solo quando li condividi o esporti tu.",
+                "Spesami funziona interamente su questo dispositivo, anche senza connessione, e non ha server né account " +
+                    "propri. Solo se attivi la sincronizzazione, i dati della spesa vengono copiati nella cartella nascosta " +
+                    "di Spesami nel tuo Google Drive. Altrimenti escono dal telefono solo quando li condividi o esporti tu.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val version = remember { runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull().orEmpty() }
             Text(
-                "Versione 1.3.0",
+                "Versione $version",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(16.dp),
@@ -125,7 +132,13 @@ fun SettingsScreen(vm: AppViewModel, data: AppData, prefs: Preferences, onOpenIn
             text = {
                 Text(
                     "Il file contiene ${state.summary}.\n\nTutti i dati attuali di questo dispositivo verranno " +
-                        "sostituiti. L'operazione non si può annullare: se vuoi, esporta prima un backup dei dati attuali."
+                        "sostituiti. L'operazione non si può annullare: se vuoi, esporta prima un backup dei dati attuali." +
+                        if (syncStatus.info?.enabled == true) {
+                            "\n\nLa sincronizzazione è attiva: il ripristino verrà applicato anche agli altri telefoni " +
+                                "(ciò che non è nel backup verrà eliminato anche lì)."
+                        } else {
+                            ""
+                        }
                 )
             },
             confirmButton = { TextButton(onClick = vm::confirmRestore) { Text("Sostituisci i dati") } },
