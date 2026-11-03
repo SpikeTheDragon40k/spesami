@@ -7,10 +7,14 @@ import android.database.sqlite.SQLiteOpenHelper
 import it.spesami.core.DefaultCategories
 import it.spesami.core.IngredientDictionary
 import it.spesami.core.IngredientNames
+import it.spesami.core.Uids
 
 class SpesamiDatabase(context: Context, name: String? = "spesami.db") : SQLiteOpenHelper(context, name, null, VERSION) {
     companion object {
-        const val VERSION = 3
+        const val VERSION = 4
+
+        /** Tables whose rows are synced as entities with their own global id (the `uid` column). */
+        val UID_TABLES = listOf("shopping_category", "ingredient", "ingredient_alias", "recipe")
     }
 
     override fun onConfigure(db: SQLiteDatabase) {
@@ -58,12 +62,45 @@ class SpesamiDatabase(context: Context, name: String? = "spesami.db") : SQLiteOp
         )
         db.execSQL("CREATE TABLE preference (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         createChecklistTables(db)
+        migrateTo4(db) // the same code path as an upgrade, so new and migrated databases are identical
     }
 
     /** Runs inside a transaction: if any step fails, the database stays at the old version, untouched. */
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) migrateTo2(db)
         if (oldVersion < 3) createChecklistTables(db)
+        if (oldVersion < 4) migrateTo4(db)
+    }
+
+    /**
+     * Version 4: groundwork for sync between devices. Additive only: no row is changed except to receive its id.
+     *
+     * - `uid` on every synced entity: a global id, unique across devices, next to the local integer id. The local
+     *   ids and every foreign key stay as they are, so no relationship is touched. Existing rows get a random
+     *   UUID; the seeded categories get `builtin:<key>`, the same on every phone. A unique index (not a column
+     *   constraint, which ALTER TABLE cannot add) keeps them unique.
+     * - `ingredient_redirect`: "this ingredient was merged into that one", by uid, so other devices can move their
+     *   own references too instead of only seeing a deletion.
+     * - `sync_stamp`, `sync_tombstone`, `sync_state`: per-field version stamps, deletions and this device's sync
+     *   state. Never part of JSON backups: a restored backup must not copy one phone's identity to another.
+     */
+    private fun migrateTo4(db: SQLiteDatabase) {
+        for (table in UID_TABLES) {
+            db.execSQL("ALTER TABLE $table ADD COLUMN uid TEXT")
+            val builtinKey = if (table == "shopping_category") "builtin_key" else "NULL"
+            val rows = db.rawQuery("SELECT id, $builtinKey FROM $table", null).use { c ->
+                buildList { while (c.moveToNext()) add(c.getLong(0) to c.getString(1)) }
+            }
+            for ((id, key) in rows) {
+                val uid = key?.let(Uids::builtinCategory) ?: Uids.random()
+                db.update(table, ContentValues().apply { put("uid", uid) }, "id = ?", arrayOf(id.toString()))
+            }
+            db.execSQL("CREATE UNIQUE INDEX ${table}_uid ON $table(uid)")
+        }
+        db.execSQL("CREATE TABLE ingredient_redirect (from_uid TEXT PRIMARY KEY, to_uid TEXT NOT NULL)")
+        db.execSQL("CREATE TABLE sync_stamp (uid TEXT NOT NULL, field TEXT NOT NULL, hlc TEXT NOT NULL, PRIMARY KEY (uid, field))")
+        db.execSQL("CREATE TABLE sync_tombstone (uid TEXT PRIMARY KEY, hlc TEXT NOT NULL)")
+        db.execSQL("CREATE TABLE sync_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
     }
 
     /**

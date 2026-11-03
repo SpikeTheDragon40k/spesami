@@ -10,18 +10,21 @@ enum class MealType(val label: String) {
 /**
  * A user-editable shopping-list category. [position] gives the order on the list; [builtinKey] identifies the
  * seeded defaults (see [DefaultCategories]) independently of their (renamable) name.
+ *
+ * Every synced entity has a [uid]: a global id, the same on every device (see [Uids]), next to the local
+ * SQLite [id] that relationships use. Empty only for data that has not been stored yet.
  */
-data class ShoppingCategory(val id: Long, val name: String, val position: Int, val builtinKey: String? = null)
+data class ShoppingCategory(val id: Long, val name: String, val position: Int, val builtinKey: String? = null, val uid: String = "")
 
 /**
  * [categoryId] null means "Da classificare". [categoryManual] is true once the user picked the category
  * (including picking "Da classificare"); automatic classification never touches those ingredients.
  */
-data class Ingredient(val id: Long, val name: String, val categoryId: Long? = null, val categoryManual: Boolean = false)
+data class Ingredient(val id: Long, val name: String, val categoryId: Long? = null, val categoryManual: Boolean = false, val uid: String = "")
 
-data class IngredientAlias(val id: Long, val ingredientId: Long, val alias: String)
+data class IngredientAlias(val id: Long, val ingredientId: Long, val alias: String, val uid: String = "")
 
-data class Recipe(val id: Long, val name: String, val notes: String, val ingredientIds: List<Long>)
+data class Recipe(val id: Long, val name: String, val notes: String, val ingredientIds: List<Long>, val uid: String = "")
 
 /** One lunch or dinner of one day. [day] is 0 (Monday) .. 6 (Sunday) of the week starting on [weekStart]. */
 data class MealSlot(val weekStart: LocalDate, val day: Int, val meal: MealType, val recipeId: Long)

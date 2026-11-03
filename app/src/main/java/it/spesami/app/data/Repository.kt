@@ -12,6 +12,7 @@ import it.spesami.core.MealSlot
 import it.spesami.core.MealType
 import it.spesami.core.Recipe
 import it.spesami.core.ShoppingCategory
+import it.spesami.core.Uids
 import it.spesami.core.WeekItem
 import java.time.LocalDate
 
@@ -20,28 +21,28 @@ class Repository(private val helper: SpesamiDatabase) {
     private val db: SQLiteDatabase get() = helper.writableDatabase
 
     fun load(): AppData {
-        val categories = db.rawQuery("SELECT id, name, position, builtin_key FROM shopping_category ORDER BY position, id", null).use { c ->
-            buildList { while (c.moveToNext()) add(ShoppingCategory(c.getLong(0), c.getString(1), c.getInt(2), c.getString(3))) }
+        val categories = db.rawQuery("SELECT id, name, position, builtin_key, uid FROM shopping_category ORDER BY position, id", null).use { c ->
+            buildList { while (c.moveToNext()) add(ShoppingCategory(c.getLong(0), c.getString(1), c.getInt(2), c.getString(3), c.getString(4))) }
         }
-        val ingredients = db.rawQuery("SELECT id, name, category_id, category_manual FROM ingredient", null).use { c ->
+        val ingredients = db.rawQuery("SELECT id, name, category_id, category_manual, uid FROM ingredient", null).use { c ->
             buildList {
                 while (c.moveToNext()) {
-                    add(Ingredient(c.getLong(0), c.getString(1), if (c.isNull(2)) null else c.getLong(2), c.getInt(3) != 0))
+                    add(Ingredient(c.getLong(0), c.getString(1), if (c.isNull(2)) null else c.getLong(2), c.getInt(3) != 0, c.getString(4)))
                 }
             }
         }
-        val aliases = db.rawQuery("SELECT id, ingredient_id, alias FROM ingredient_alias ORDER BY alias", null).use { c ->
-            buildList { while (c.moveToNext()) add(IngredientAlias(c.getLong(0), c.getLong(1), c.getString(2))) }
+        val aliases = db.rawQuery("SELECT id, ingredient_id, alias, uid FROM ingredient_alias ORDER BY alias", null).use { c ->
+            buildList { while (c.moveToNext()) add(IngredientAlias(c.getLong(0), c.getLong(1), c.getString(2), c.getString(3))) }
         }
         val recipeIngredients = HashMap<Long, MutableList<Long>>()
         db.rawQuery("SELECT recipe_id, ingredient_id FROM recipe_ingredient ORDER BY recipe_id, position", null).use { c ->
             while (c.moveToNext()) recipeIngredients.getOrPut(c.getLong(0)) { mutableListOf() } += c.getLong(1)
         }
-        val recipes = db.rawQuery("SELECT id, name, notes FROM recipe", null).use { c ->
+        val recipes = db.rawQuery("SELECT id, name, notes, uid FROM recipe", null).use { c ->
             buildList {
                 while (c.moveToNext()) {
                     val id = c.getLong(0)
-                    add(Recipe(id, c.getString(1), c.getString(2), recipeIngredients[id].orEmpty()))
+                    add(Recipe(id, c.getString(1), c.getString(2), recipeIngredients[id].orEmpty(), c.getString(3)))
                 }
             }
         }
@@ -71,7 +72,7 @@ class Repository(private val helper: SpesamiDatabase) {
             put("notes", notes.trim())
         }
         val recipeId = if (id == null) {
-            db.insertOrThrow("recipe", null, values)
+            db.insertOrThrow("recipe", null, values.apply { put("uid", Uids.random()) })
         } else {
             db.update("recipe", values, "id = ?", arrayOf(id.toString()))
             db.delete("recipe_ingredient", "recipe_id = ?", arrayOf(id.toString()))
@@ -242,6 +243,11 @@ class Repository(private val helper: SpesamiDatabase) {
     fun mergeIngredient(sourceId: Long, targetId: Long) = inTransaction {
         if (sourceId == targetId) return@inTransaction
         val sourceName = ingredientName(sourceId)
+        // Remembered by global id, so the merge can be repeated on other devices (see SpesamiDatabase.migrateTo4).
+        db.insertWithOnConflict("ingredient_redirect", null, ContentValues().apply {
+            put("from_uid", ingredientUid(sourceId))
+            put("to_uid", ingredientUid(targetId))
+        }, SQLiteDatabase.CONFLICT_REPLACE)
         val src = arrayOf(sourceId.toString())
         db.execSQL(
             "INSERT OR IGNORE INTO recipe_ingredient (recipe_id, ingredient_id, position) " +
@@ -290,6 +296,7 @@ class Repository(private val helper: SpesamiDatabase) {
             put("name", clean)
             put("name_key", IngredientNames.key(clean))
             put("position", insertAt)
+            put("uid", Uids.random())
         })
         writePositions(ordered.toMutableList().apply { add(insertAt, id) })
         CategoryChange.Done
@@ -355,6 +362,7 @@ class Repository(private val helper: SpesamiDatabase) {
                 put("name_key", IngredientNames.key(it.name))
                 put("position", it.position)
                 put("builtin_key", it.builtinKey)
+                put("uid", it.uid.ifEmpty { it.builtinKey?.let(Uids::builtinCategory) ?: Uids.random() })
             })
         }
         data.ingredients.forEach {
@@ -364,14 +372,16 @@ class Repository(private val helper: SpesamiDatabase) {
                 put("name_key", IngredientNames.key(it.name))
                 put("category_id", it.categoryId)
                 put("category_manual", if (it.categoryManual) 1 else 0)
+                put("uid", it.uid.ifEmpty { Uids.random() })
             })
         }
-        data.aliases.forEach { insertAlias(it.ingredientId, it.alias) }
+        data.aliases.forEach { insertAlias(it.ingredientId, it.alias, it.uid) }
         data.recipes.forEach { r ->
             db.insertOrThrow("recipe", null, ContentValues().apply {
                 put("id", r.id)
                 put("name", r.name)
                 put("notes", r.notes)
+                put("uid", r.uid.ifEmpty { Uids.random() })
             })
             r.ingredientIds.forEachIndexed { position, ingredientId ->
                 db.insertOrThrow("recipe_ingredient", null, ContentValues().apply {
@@ -395,6 +405,7 @@ class Repository(private val helper: SpesamiDatabase) {
             put("name", IngredientNames.clean(name))
             put("name_key", key)
             put("category_id", suggestedCategoryId(name)) // automatic, only for unambiguous dictionary matches
+            put("uid", Uids.random())
         })
     }
 
@@ -421,11 +432,12 @@ class Repository(private val helper: SpesamiDatabase) {
         }
     }
 
-    private fun insertAlias(ingredientId: Long, alias: String) {
+    private fun insertAlias(ingredientId: Long, alias: String, uid: String = "") {
         db.insertWithOnConflict("ingredient_alias", null, ContentValues().apply {
             put("ingredient_id", ingredientId)
             put("alias", IngredientNames.clean(alias))
             put("alias_key", IngredientNames.key(alias))
+            put("uid", uid.ifEmpty { Uids.random() })
         }, SQLiteDatabase.CONFLICT_IGNORE)
     }
 
@@ -434,6 +446,9 @@ class Repository(private val helper: SpesamiDatabase) {
 
     private fun aliasOwnerByKey(key: String): Long? =
         db.rawQuery("SELECT ingredient_id FROM ingredient_alias WHERE alias_key = ?", arrayOf(key)).use { if (it.moveToFirst()) it.getLong(0) else null }
+
+    private fun ingredientUid(id: Long): String =
+        db.rawQuery("SELECT uid FROM ingredient WHERE id = ?", arrayOf(id.toString())).use { if (it.moveToFirst()) it.getString(0) else "" }
 
     private fun ingredientName(id: Long): String =
         db.rawQuery("SELECT name FROM ingredient WHERE id = ?", arrayOf(id.toString())).use { if (it.moveToFirst()) it.getString(0) else "" }

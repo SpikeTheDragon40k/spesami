@@ -111,4 +111,43 @@ class RepositoryTest {
         val next = repo.saveRecipe(null, "Nuova", "", listOf("Uova"))
         assertTrue(next > r)
     }
+
+    @Test
+    fun newRowsGetGlobalIds() {
+        val recipe = repo.saveRecipe(null, "Frittata", "", listOf("Uova", "Patate"))
+        repo.addAlias(repo.load().ingredients.single { it.name == "Patate" }.id, "Patata")
+        repo.createCategory("Animali")
+        val data = repo.load()
+        val uids = data.ingredients.map { it.uid } + data.aliases.map { it.uid } + data.recipes.map { it.uid } + data.categories.map { it.uid }
+        assertTrue(uids.all { it.isNotBlank() })
+        assertEquals(uids.size, uids.toSet().size)
+        // Editing keeps the id.
+        val before = data.recipesById.getValue(recipe).uid
+        repo.saveRecipe(recipe, "Frittata di patate", "", listOf("Uova"))
+        assertEquals(before, repo.load().recipesById.getValue(recipe).uid)
+    }
+
+    @Test
+    fun mergingRemembersTheRedirectByGlobalId() {
+        repo.saveRecipe(null, "Purè", "", listOf("Patate", "Patata"))
+        val data = repo.load()
+        val patate = data.ingredients.single { it.name == "Patate" }
+        val patata = data.ingredients.single { it.name == "Patata" }
+        repo.addAlias(patate.id, "Patata")
+        val redirect = helper.readableDatabase.rawQuery("SELECT from_uid, to_uid FROM ingredient_redirect", null).use {
+            it.moveToFirst(); it.getString(0) to it.getString(1)
+        }
+        assertEquals(patata.uid to patate.uid, redirect)
+    }
+
+    @Test
+    fun restoreKeepsTheGlobalIdsOfTheData() {
+        repo.saveRecipe(null, "Frittata", "", listOf("Uova"))
+        val data = repo.load()
+        repo.replaceAll(data)
+        val restored = repo.load()
+        assertEquals(data.recipes.map { it.uid }, restored.recipes.map { it.uid })
+        assertEquals(data.ingredients.map { it.uid }, restored.ingredients.map { it.uid })
+        assertEquals(data.categories.map { it.uid }, restored.categories.map { it.uid })
+    }
 }

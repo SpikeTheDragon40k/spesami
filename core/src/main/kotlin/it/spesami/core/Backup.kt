@@ -20,6 +20,9 @@ data class BackupFile(
     val mealPlan: List<BackupMeal>,
     val preferences: Map<String, String> = emptyMap(),
     /** Since version 3: products added by hand and purchased marks of each week's checklist. */
+    // Since app 1.4.0, categories, ingredients, aliases and recipes may carry their global `uid` (optional, so the
+    // format version stays 3 and older apps still read these files): a restore then keeps each record's identity
+    // for sync instead of turning everything into new records.
     val shoppingExtras: List<BackupWeekItem> = emptyList(),
     val shoppingPurchased: List<BackupWeekItem> = emptyList(),
 ) {
@@ -30,7 +33,7 @@ data class BackupFile(
 }
 
 @Serializable
-data class BackupCategory(val id: Long, val name: String, val position: Int, val builtinKey: String? = null)
+data class BackupCategory(val id: Long, val name: String, val position: Int, val builtinKey: String? = null, val uid: String? = null)
 
 /** [category] is the version 1 enum name; version 2 uses [categoryId] and [categoryManual]. */
 @Serializable
@@ -40,13 +43,14 @@ data class BackupIngredient(
     val category: String? = null,
     val categoryId: Long? = null,
     val categoryManual: Boolean = false,
+    val uid: String? = null,
 )
 
 @Serializable
-data class BackupAlias(val ingredientId: Long, val alias: String)
+data class BackupAlias(val ingredientId: Long, val alias: String, val uid: String? = null)
 
 @Serializable
-data class BackupRecipe(val id: Long, val name: String, val notes: String = "", val ingredientIds: List<Long>)
+data class BackupRecipe(val id: Long, val name: String, val notes: String = "", val ingredientIds: List<Long>, val uid: String? = null)
 
 /** [weekStart] is an ISO date (a Monday), [day] 0..6, [meal] a [MealType] name. */
 @Serializable
@@ -73,10 +77,10 @@ object Backup {
         BackupFile.serializer(),
         BackupFile(
             createdAt = createdAt,
-            categories = data.sortedCategories.map { BackupCategory(it.id, it.name, it.position, it.builtinKey) },
-            ingredients = data.ingredients.map { BackupIngredient(it.id, it.name, categoryId = it.categoryId, categoryManual = it.categoryManual) },
-            aliases = data.aliases.map { BackupAlias(it.ingredientId, it.alias) },
-            recipes = data.recipes.map { BackupRecipe(it.id, it.name, it.notes, it.ingredientIds) },
+            categories = data.sortedCategories.map { BackupCategory(it.id, it.name, it.position, it.builtinKey, it.uid.ifEmpty { null }) },
+            ingredients = data.ingredients.map { BackupIngredient(it.id, it.name, categoryId = it.categoryId, categoryManual = it.categoryManual, uid = it.uid.ifEmpty { null }) },
+            aliases = data.aliases.map { BackupAlias(it.ingredientId, it.alias, it.uid.ifEmpty { null }) },
+            recipes = data.recipes.map { BackupRecipe(it.id, it.name, it.notes, it.ingredientIds, it.uid.ifEmpty { null }) },
             mealPlan = data.slots.map { BackupMeal(it.weekStart.toString(), it.day, it.meal.name, it.recipeId) },
             preferences = data.preferences,
             shoppingExtras = data.manualItems.map { BackupWeekItem(it.weekStart.toString(), it.ingredientId) },
@@ -103,8 +107,15 @@ object Backup {
         }
 
         val errors = mutableListOf<String>()
+        // Global ids, when present, must be unique across the whole file; missing ones are assigned on restore.
+        val uids = HashSet<String>()
+        fun uid(value: String?): String {
+            val clean = value?.trim().orEmpty()
+            if (clean.isNotEmpty() && !uids.add(clean)) errors += "Identificativo ripetuto nel backup: \"$clean\"."
+            return clean
+        }
 
-        val categories = if (file.version < 2) DefaultCategories.seed() else validateCategories(file.categories, errors)
+        val categories = if (file.version < 2) DefaultCategories.seed() else validateCategories(file.categories, errors, ::uid)
         val categoryIds = categories.map { it.id }.toSet()
         val idByKey = categories.mapNotNull { c -> c.builtinKey?.let { it to c.id } }.toMap()
 
@@ -124,14 +135,14 @@ object Backup {
                 if (i.categoryId != null && i.categoryId !in categoryIds) {
                     errors += "L'ingrediente \"${i.name}\" usa una categoria inesistente (${i.categoryId})."
                 }
-                Ingredient(i.id, IngredientNames.clean(i.name), i.categoryId, i.categoryManual)
+                Ingredient(i.id, IngredientNames.clean(i.name), i.categoryId, i.categoryManual, uid(i.uid))
             }
         }
         val aliases = file.aliases.mapIndexed { index, a ->
             if (a.ingredientId !in ingredientIds) errors += "L'alias \"${a.alias}\" punta a un ingrediente inesistente."
             if (a.alias.isBlank()) errors += "Alias vuoto."
             if (!nameKeys.add(IngredientNames.key(a.alias))) errors += "Alias ripetuto o uguale a un ingrediente: \"${a.alias}\"."
-            IngredientAlias(index + 1L, a.ingredientId, IngredientNames.clean(a.alias))
+            IngredientAlias(index + 1L, a.ingredientId, IngredientNames.clean(a.alias), uid(a.uid))
         }
         val recipeIds = HashSet<Long>()
         val recipes = file.recipes.map { r ->
@@ -140,7 +151,7 @@ object Backup {
             r.ingredientIds.filter { it !in ingredientIds }.forEach {
                 errors += "La ricetta \"${r.name}\" usa un ingrediente inesistente ($it)."
             }
-            Recipe(r.id, r.name.trim(), r.notes, r.ingredientIds.distinct())
+            Recipe(r.id, r.name.trim(), r.notes, r.ingredientIds.distinct(), uid(r.uid))
         }
         val slotKeys = HashSet<Triple<LocalDate, Int, MealType>>()
         val slots = file.mealPlan.mapNotNull { m ->
@@ -187,7 +198,7 @@ object Backup {
         return BackupReadResult.Valid(data, summary)
     }
 
-    private fun validateCategories(list: List<BackupCategory>, errors: MutableList<String>): List<ShoppingCategory> {
+    private fun validateCategories(list: List<BackupCategory>, errors: MutableList<String>, uid: (String?) -> String): List<ShoppingCategory> {
         val ids = HashSet<Long>()
         val names = HashSet<String>()
         val keys = HashSet<String>()
@@ -202,6 +213,7 @@ object Backup {
         if (DefaultCategories.OTHER !in keys) errors += "Manca la categoria \"Altro\"."
         // Positions are normalised to 0..n-1 in their saved order.
         return list.sortedWith(compareBy({ it.position }, { it.id }))
-            .mapIndexed { i, c -> ShoppingCategory(c.id, c.name.trim(), i, c.builtinKey) }
+            // A seeded category's uid is always derived from its key, so it matches the other phones'.
+            .mapIndexed { i, c -> ShoppingCategory(c.id, c.name.trim(), i, c.builtinKey, c.builtinKey?.let(Uids::builtinCategory) ?: uid(c.uid)) }
     }
 }

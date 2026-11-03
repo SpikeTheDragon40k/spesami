@@ -95,4 +95,40 @@ class BackupTest {
         assertTrue(result.data.purchases.isEmpty() && result.data.manualItems.isEmpty())
         assertEquals(data.recipes, result.data.recipes)
     }
+
+    private val withUids = data.copy(
+        ingredients = data.ingredients.map { it.copy(uid = "ing-${it.id}") },
+        aliases = data.aliases.map { it.copy(uid = "alias-${it.id}") },
+        recipes = data.recipes.map { it.copy(uid = "rec-${it.id}") },
+        categories = data.categories.map { if (it.builtinKey == null) it.copy(uid = "cat-${it.id}") else it },
+    )
+
+    @Test
+    fun roundTripKeepsGlobalIds() {
+        val result = Backup.decode(Backup.encode(withUids, "2026-11-03T10:00:00")) as BackupReadResult.Valid
+        assertEquals(withUids, result.data)
+    }
+
+    @Test
+    fun seededCategoriesAlwaysGetTheirBuiltinId() {
+        val tampered = withUids.copy(categories = withUids.categories.map { if (it.builtinKey == "altro") it.copy(uid = "something-else") else it })
+        val result = Backup.decode(Backup.encode(tampered, "2026-11-03")) as BackupReadResult.Valid
+        assertEquals("builtin:altro", result.data.categories.single { it.builtinKey == "altro" }.uid)
+    }
+
+    @Test
+    fun rejectsRepeatedGlobalIds() {
+        val broken = withUids.copy(recipes = withUids.recipes.map { it.copy(uid = "ing-1") })
+        val result = Backup.decode(Backup.encode(broken, "2026-11-03"))
+        assertTrue(result is BackupReadResult.Invalid)
+        assertTrue((result as BackupReadResult.Invalid).errors.any { "ing-1" in it })
+    }
+
+    @Test
+    fun olderBackupsWithoutIdsAreStillAccepted() {
+        val old = Backup.encode(data, "2026-11-02")
+        assertTrue("no uid keys" , "\"uid\"" !in old.replace("\"uid\": \"builtin:", ""))
+        val result = Backup.decode(old) as BackupReadResult.Valid
+        assertTrue(result.data.ingredients.all { it.uid.isEmpty() })
+    }
 }

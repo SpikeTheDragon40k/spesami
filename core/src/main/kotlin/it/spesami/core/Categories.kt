@@ -25,8 +25,8 @@ object DefaultCategories {
 
     val keys: Set<String> = all.map { it.first }.toSet()
 
-    /** Stable ids 1..12 in default order. */
-    fun seed(): List<ShoppingCategory> = all.mapIndexed { i, (key, name) -> ShoppingCategory(i + 1L, name, i, key) }
+    /** Stable ids 1..12 in default order, and global ids that are the same on every device. */
+    fun seed(): List<ShoppingCategory> = all.mapIndexed { i, (key, name) -> ShoppingCategory(i + 1L, name, i, key, Uids.builtinCategory(key)) }
 
     /**
      * Maps a category of the first app version (an enum name) to a default category. The old groups were
