@@ -13,6 +13,8 @@ class LocalSyncJsonTest {
         val a = world.phone("a")
         val week = LocalDate.of(2026, 11, 2)
         a.edit { saveRecipe("Frittata", listOf("Uova", "Patate"), "Padella") }
+        a.edit { saveRecipe("Purè", listOf("Patate")) }
+        a.edit { setColor(recipe("Purè"), "yellow") }
         a.edit { setMeal(week, 1, MealType.DINNER, recipe("Frittata")) }
         a.edit { tick(week, ingredient("Uova")) }
         a.edit { addProduct(week, "Sapone") }
@@ -22,6 +24,7 @@ class LocalSyncJsonTest {
         assertEquals(a.local.deviceId, back!!.deviceId)
         assertEquals(a.local.state, back.state)
         assertEquals(a.local.last, back.last)
+        assertEquals("yellow", back.last!!.recipes.single().color)
     }
 
     @Test

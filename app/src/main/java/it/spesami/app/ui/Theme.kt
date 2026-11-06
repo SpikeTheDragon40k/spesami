@@ -4,7 +4,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import it.spesami.core.RecipeColor
 
 /** The Dracula palette (https://draculatheme.com/contribute), also used by the dark PDF exports. */
 object Dracula {
@@ -71,7 +75,20 @@ private val LightColors = lightColorScheme(
     surface = Color(0xFFFDF8FF),
 )
 
+/** Whether the Dracula (dark) theme is active, for colours that are not part of the Material scheme. */
+val LocalDarkTheme = staticCompositionLocalOf { false }
+
 @Composable
 fun SpesamiTheme(dark: Boolean, content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (dark) DraculaColors else LightColors, content = content)
+    CompositionLocalProvider(LocalDarkTheme provides dark) {
+        MaterialTheme(colorScheme = if (dark) DraculaColors else LightColors, content = content)
+    }
 }
+
+/** The background of a meal of this recipe, readable under the theme's normal text colours. */
+val RecipeColor.tint: Color
+    @Composable @ReadOnlyComposable get() = Color(if (LocalDarkTheme.current) tintDark else tintLight)
+
+/** The saturated colour, for picker dots and accent bars. */
+val RecipeColor.swatch: Color
+    @Composable @ReadOnlyComposable get() = Color(if (LocalDarkTheme.current) swatchDark else swatchLight)

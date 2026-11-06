@@ -106,7 +106,8 @@ object SyncChanges {
 
     private fun fields(a: SnapAlias) = mapOf("ing" to a.ingredientUid, "name" to a.alias)
 
-    private fun fields(r: SnapRecipe) = mapOf("name" to r.name, "notes" to r.notes)
+    // "color" was added in app 1.5.0: older apps ignore the field but keep it when merging, so it survives them.
+    private fun fields(r: SnapRecipe) = mapOf("name" to r.name, "notes" to r.notes, "color" to r.color)
 
     fun encodeCategory(uid: String?, manual: Boolean) = (if (manual) "m:" else "a:") + uid.orEmpty()
 }

@@ -23,6 +23,7 @@ data class BackupFile(
     // Since app 1.4.0, categories, ingredients, aliases and recipes may carry their global `uid` (optional, so the
     // format version stays 3 and older apps still read these files): a restore then keeps each record's identity
     // for sync instead of turning everything into new records.
+    // Since app 1.5.0, recipes may carry a `color` key (optional too: older apps ignore it, older files have none).
     val shoppingExtras: List<BackupWeekItem> = emptyList(),
     val shoppingPurchased: List<BackupWeekItem> = emptyList(),
 ) {
@@ -50,7 +51,15 @@ data class BackupIngredient(
 data class BackupAlias(val ingredientId: Long, val alias: String, val uid: String? = null)
 
 @Serializable
-data class BackupRecipe(val id: Long, val name: String, val notes: String = "", val ingredientIds: List<Long>, val uid: String? = null)
+data class BackupRecipe(
+    val id: Long,
+    val name: String,
+    val notes: String = "",
+    val ingredientIds: List<Long>,
+    val uid: String? = null,
+    /** A [RecipeColor.key]; an unknown one (from a newer app) is read as no colour. */
+    val color: String? = null,
+)
 
 /** [weekStart] is an ISO date (a Monday), [day] 0..6, [meal] a [MealType] name. */
 @Serializable
@@ -80,7 +89,7 @@ object Backup {
             categories = data.sortedCategories.map { BackupCategory(it.id, it.name, it.position, it.builtinKey, it.uid.ifEmpty { null }) },
             ingredients = data.ingredients.map { BackupIngredient(it.id, it.name, categoryId = it.categoryId, categoryManual = it.categoryManual, uid = it.uid.ifEmpty { null }) },
             aliases = data.aliases.map { BackupAlias(it.ingredientId, it.alias, it.uid.ifEmpty { null }) },
-            recipes = data.recipes.map { BackupRecipe(it.id, it.name, it.notes, it.ingredientIds, it.uid.ifEmpty { null }) },
+            recipes = data.recipes.map { BackupRecipe(it.id, it.name, it.notes, it.ingredientIds, it.uid.ifEmpty { null }, it.color?.key) },
             mealPlan = data.slots.map { BackupMeal(it.weekStart.toString(), it.day, it.meal.name, it.recipeId) },
             preferences = data.preferences,
             shoppingExtras = data.manualItems.map { BackupWeekItem(it.weekStart.toString(), it.ingredientId) },
@@ -151,7 +160,7 @@ object Backup {
             r.ingredientIds.filter { it !in ingredientIds }.forEach {
                 errors += "La ricetta \"${r.name}\" usa un ingrediente inesistente ($it)."
             }
-            Recipe(r.id, r.name.trim(), r.notes, r.ingredientIds.distinct(), uid(r.uid))
+            Recipe(r.id, r.name.trim(), r.notes, r.ingredientIds.distinct(), uid(r.uid), RecipeColor.fromKey(r.color))
         }
         val slotKeys = HashSet<Triple<LocalDate, Int, MealType>>()
         val slots = file.mealPlan.mapNotNull { m ->

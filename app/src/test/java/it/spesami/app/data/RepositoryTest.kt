@@ -3,6 +3,7 @@ package it.spesami.app.data
 import it.spesami.core.Backup
 import it.spesami.core.BackupReadResult
 import it.spesami.core.MealType
+import it.spesami.core.RecipeColor
 import it.spesami.core.ShoppingList
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -149,5 +150,38 @@ class RepositoryTest {
         assertEquals(data.recipes.map { it.uid }, restored.recipes.map { it.uid })
         assertEquals(data.ingredients.map { it.uid }, restored.ingredients.map { it.uid })
         assertEquals(data.categories.map { it.uid }, restored.categories.map { it.uid })
+    }
+
+    // --- Recipe colours
+
+    @Test
+    fun recipeColourIsSavedChangedAndCleared() {
+        val id = repo.saveRecipe(null, "Frittata", "", listOf("Uova"), RecipeColor.TEAL)
+        assertEquals(RecipeColor.TEAL, repo.load().recipesById.getValue(id).color)
+        repo.saveRecipe(id, "Frittata", "", listOf("Uova"), RecipeColor.PINK)
+        assertEquals(RecipeColor.PINK, repo.load().recipesById.getValue(id).color)
+        repo.saveRecipe(id, "Frittata", "", listOf("Uova"), null)
+        assertEquals(null, repo.load().recipesById.getValue(id).color)
+    }
+
+    @Test
+    fun recipeColourSurvivesBackupAndRestore() {
+        val id = repo.saveRecipe(null, "Frittata", "", listOf("Uova"), RecipeColor.RED)
+        repo.saveRecipe(null, "Purè", "", listOf("Patate"))
+        val backup = Backup.encode(repo.load(), "2026-11-06")
+        repo.replaceAll((Backup.decode(backup) as BackupReadResult.Valid).data)
+        val restored = repo.load()
+        assertEquals(RecipeColor.RED, restored.recipesById.getValue(id).color)
+        assertEquals(null, restored.recipes.single { it.name == "Purè" }.color)
+    }
+
+    @Test
+    fun recipeColourComesInFromSync() {
+        repo.saveRecipe(null, "Frittata", "", listOf("Uova"))
+        val before = repo.syncSnapshot()
+        val target = before.copy(recipes = before.recipes.map { it.copy(color = "purple") })
+        assertTrue(repo.applySnapshot(before, target))
+        assertEquals(RecipeColor.PURPLE, repo.load().recipes.single().color)
+        assertEquals(target, repo.syncSnapshot())
     }
 }

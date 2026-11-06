@@ -27,7 +27,10 @@ phones in step through your own Google Drive.**
 ## Features
 
 - **Piano**: 7 days × lunch/dinner, week navigation, copy previous week, clear week, themed PDF export (A4 landscape).
-- **Ricette**: reusable recipes, each with a name, notes, and a list of ingredient names (no quantities).
+- **Ricette**: reusable recipes, each with a name, notes, a list of ingredient names (no quantities), and an
+  optional colour picked by hand (8 colours or none). A coloured recipe's meals are tinted with it in the weekly
+  plan, in the app and in the PDF. Every colour has a light and a dark (Dracula) shade, checked by tests for
+  readable text; the "Risparmio inchiostro" PDF uses a paler tint plus a thin coloured bar.
 - **Spesa**: a weekly checklist. Ingredients are aggregated from the week's meals and deduplicated by canonical
   name and alias, with the number of meals each one appears in. The list is grouped by category (in the configured
   order, collapsible, still-to-buy before purchased and A–Z inside each category, "Da classificare" last).
@@ -82,6 +85,11 @@ every phone) on categories, ingredients, aliases and recipes, next to the local 
 keep using; `ingredient_redirect` (ingredient merges by uid) and `sync_state` (this device's sync data, never in
 backups). New databases run the same migration, so new and upgraded schemas are identical. Backups now carry the
 uids (optional fields, format still 3), so a restore keeps each record's identity.
+Schema version 5 added `recipe.color` (a `RecipeColor` key such as `green`, NULL = none); existing recipes simply
+have no colour. Backups carry it as an optional `color` field on each recipe (format still 3): older backups restore
+with no colours, and older apps read new backups and ignore the colours. In sync it is a new `color` field of the
+recipe record: older apps ignore it but keep it when merging, so they never erase it, and an unknown colour reads
+as none.
 
 ## Structure
 

@@ -3,6 +3,7 @@ package it.spesami.core.sync
 import it.spesami.core.DefaultCategories
 import it.spesami.core.IngredientNames
 import it.spesami.core.MealType
+import it.spesami.core.RecipeColor
 import it.spesami.core.Uids
 import java.time.DayOfWeek
 import java.time.LocalDate
@@ -23,7 +24,8 @@ import java.time.format.DateTimeParseException
  *   ingredient's alias merges into that one, as adding such an alias does in the app. Every reference to a merged
  *   ingredient (recipes, ticks, hand-added products, aliases) moves to the one that stays.
  * - Two recipes with the same name become one (smallest uid), with the ingredients of both: this is what the
- *   first sync of two phones that had entered the same recipes needs.
+ *   first sync of two phones that had entered the same recipes needs. Its colour is its own, or else the first
+ *   merged recipe's that has one. An unknown colour (from a newer app) shows as none but stays in the records.
  * - A tick or hand-added product on two merged ingredients: the most recent write wins.
  */
 object SyncMaterialize {
@@ -136,10 +138,13 @@ object SyncMaterialize {
             if (r.value("in") != "1") return@forEach
             recipeIngredients.getOrPut(key.first) { HashMap() }[key.second] = r.value("pos")?.toIntOrNull() ?: 0
         }
+        fun color(uid: String) = RecipeColor.fromKey(recipeRecords.getValue(uid).value("color"))?.key
         val recipes = recipeWinner.values.toSortedSet().map { uid ->
             val r = recipeRecords.getValue(uid)
             val ordered = recipeIngredients[uid].orEmpty().entries.sortedWith(compareBy({ it.value }, { it.key })).map { it.key }
-            SnapRecipe(uid, r.value("name")!!.trim(), r.value("notes").orEmpty(), ordered)
+            // Two same-named recipes merged: the surviving one's colour, else the first merged one that has one.
+            val colour = color(uid) ?: recipeWinner.filter { (from, to) -> to == uid && from != uid }.keys.sorted().firstNotNullOfOrNull(::color)
+            SnapRecipe(uid, r.value("name")!!.trim(), r.value("notes").orEmpty(), ordered, colour)
         }
 
         // --- Meal plan

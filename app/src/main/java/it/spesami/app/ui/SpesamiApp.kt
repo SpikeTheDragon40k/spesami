@@ -95,8 +95,8 @@ fun SpesamiApp(vm: AppViewModel) {
                 editRequest != null -> RecipeEditor(
                     request = editRequest,
                     data = current,
-                    onSave = { name, notes, ingredients ->
-                        vm.saveRecipe(editRequest.recipe?.id, name, notes, ingredients, editRequest.assignTo)
+                    onSave = { name, notes, ingredients, color ->
+                        vm.saveRecipe(editRequest.recipe?.id, name, notes, ingredients, color, editRequest.assignTo)
                         vm.message("Ricetta \"${name.trim()}\" salvata.")
                         editing = null
                     },

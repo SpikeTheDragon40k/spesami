@@ -12,6 +12,7 @@ import it.spesami.core.AppData
 import it.spesami.core.Backup
 import it.spesami.core.BackupReadResult
 import it.spesami.core.MealType
+import it.spesami.core.RecipeColor
 import it.spesami.core.ShoppingList
 import it.spesami.core.WeekItem
 import it.spesami.core.Weeks
@@ -163,10 +164,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // --- Recipes ---
 
     /** Saves the recipe and, if [assignTo] is given, puts it in that slot of the current week. */
-    fun saveRecipe(id: Long?, name: String, notes: String, ingredients: List<String>, assignTo: Pair<Int, MealType>?) {
+    fun saveRecipe(id: Long?, name: String, notes: String, ingredients: List<String>, color: RecipeColor?, assignTo: Pair<Int, MealType>?) {
         val week = _week.value
         write {
-            val recipeId = saveRecipe(id, name, notes, ingredients)
+            val recipeId = saveRecipe(id, name, notes, ingredients, color)
             if (assignTo != null) setMeal(week, assignTo.first, assignTo.second, recipeId)
         }
     }

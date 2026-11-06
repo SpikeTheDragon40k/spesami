@@ -11,7 +11,7 @@ import it.spesami.core.Uids
 
 class SpesamiDatabase(context: Context, name: String? = "spesami.db") : SQLiteOpenHelper(context, name, null, VERSION) {
     companion object {
-        const val VERSION = 4
+        const val VERSION = 5
 
         /** Tables whose rows are synced as entities with their own global id (the `uid` column). */
         val UID_TABLES = listOf("shopping_category", "ingredient", "ingredient_alias", "recipe")
@@ -62,7 +62,9 @@ class SpesamiDatabase(context: Context, name: String? = "spesami.db") : SQLiteOp
         )
         db.execSQL("CREATE TABLE preference (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         createChecklistTables(db)
-        migrateTo4(db) // the same code path as an upgrade, so new and migrated databases are identical
+        // The same code paths as an upgrade, so new and migrated databases are identical.
+        migrateTo4(db)
+        migrateTo5(db)
     }
 
     /** Runs inside a transaction: if any step fails, the database stays at the old version, untouched. */
@@ -70,6 +72,15 @@ class SpesamiDatabase(context: Context, name: String? = "spesami.db") : SQLiteOp
         if (oldVersion < 2) migrateTo2(db)
         if (oldVersion < 3) createChecklistTables(db)
         if (oldVersion < 4) migrateTo4(db)
+        if (oldVersion < 5) migrateTo5(db)
+    }
+
+    /**
+     * Version 5: `recipe.color`, the colour picked by hand for a recipe (a [it.spesami.core.RecipeColor] key; NULL
+     * = none). Additive only: existing recipes simply have no colour.
+     */
+    private fun migrateTo5(db: SQLiteDatabase) {
+        db.execSQL("ALTER TABLE recipe ADD COLUMN color TEXT")
     }
 
     /**

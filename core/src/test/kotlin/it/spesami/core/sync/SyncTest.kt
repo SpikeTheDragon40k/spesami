@@ -540,4 +540,61 @@ class SyncTest {
         assertTrue(a.local.state.records.values.any { it.d != null })
         assertEquals(0, a.local.state.prunedBefore)
     }
+
+    // --- Recipe colours
+
+    @Test
+    fun aColourReachesTheOtherPhonesAndCanBeRemoved() {
+        a.edit { saveRecipe("Frittata", listOf("Uova")) }
+        a.edit { setColor(recipe("Frittata"), "green") }
+        syncAll(a, b)
+        assertEquals("green", b.db.recipes.single().color)
+        b.edit { setColor(recipe("Frittata"), null) }
+        syncAll(a, b)
+        assertEquals(null, a.db.recipes.single().color)
+    }
+
+    @Test
+    fun aColourAndARenameOnTwoPhonesBothSurvive() {
+        a.edit { saveRecipe("Frittata", listOf("Uova")) }
+        syncAll(a, b)
+        a.edit { setColor(recipe("Frittata"), "blue") }
+        b.edit { saveRecipe("Frittata alta", listOf("Uova"), uid = recipe("Frittata")) }
+        syncAll(a, b)
+        assertEquals("Frittata alta" to "blue", a.db.recipes.single().let { it.name to it.color })
+    }
+
+    @Test
+    fun aPhoneThatNeverSetsColoursDoesNotEraseThem() {
+        // What a 1.4.0 phone does: it writes only the fields it knows (name, notes) and keeps the others on merge.
+        a.edit { saveRecipe("Frittata", listOf("Uova")) }
+        a.edit { setColor(recipe("Frittata"), "pink") }
+        syncAll(a, b)
+        val uid = a.recipe("Frittata")
+        val oldPhone = b.local.state.records.getValue(uid)
+        val renamedByOldApp = oldPhone.copy(f = oldPhone.f + ("name" to Field("Frittata di b", Hlc.Clock("b") { world.now + 60_000 }.next())))
+        val merged = SyncMerge.mergeRecord(a.local.state.records.getValue(uid), renamedByOldApp)
+        assertEquals("pink", merged.value("color"))
+        assertEquals("Frittata di b", merged.value("name"))
+    }
+
+    @Test
+    fun anUnknownColourShowsAsNoneAndStaysInTheRecords() {
+        a.edit { saveRecipe("Frittata", listOf("Uova")) }
+        a.edit { setColor(recipe("Frittata"), "ultraviolet") } // as written by a newer app
+        a.sync()
+        b.sync()
+        assertEquals(null, b.db.recipes.single().color)
+        assertEquals("ultraviolet", b.local.state.records.getValue(b.recipe("Frittata")).value("color"))
+    }
+
+    @Test
+    fun sameNamedRecipesMergedKeepAColour() {
+        a.edit { saveRecipe("Frittata", listOf("Uova")) }
+        b.edit { saveRecipe("Frittata", listOf("Patate")) }
+        val coloured = if (a.recipe("Frittata") > b.recipe("Frittata")) a else b // the one that will be absorbed
+        coloured.edit { setColor(recipe("Frittata"), "orange") }
+        syncAll(a, b)
+        assertEquals("orange", a.db.recipes.single().color)
+    }
 }

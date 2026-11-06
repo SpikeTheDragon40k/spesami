@@ -35,7 +35,7 @@ object LocalSyncJson {
     @Serializable private data class C(val uid: String, val name: String, val position: Int, val builtinKey: String? = null)
     @Serializable private data class I(val uid: String, val name: String, val categoryUid: String? = null, val categoryManual: Boolean = false)
     @Serializable private data class A(val uid: String, val ingredientUid: String, val alias: String)
-    @Serializable private data class R(val uid: String, val name: String, val notes: String, val ingredientUids: List<String>)
+    @Serializable private data class R(val uid: String, val name: String, val notes: String, val ingredientUids: List<String>, val color: String? = null)
     @Serializable private data class S(val weekStart: String, val day: Int, val meal: String, val recipeUid: String)
     @Serializable private data class W(val weekStart: String, val ingredientUid: String)
 
@@ -58,7 +58,7 @@ object LocalSyncJson {
         s.categories.map { C(it.uid, it.name, it.position, it.builtinKey) },
         s.ingredients.map { I(it.uid, it.name, it.categoryUid, it.categoryManual) },
         s.aliases.map { A(it.uid, it.ingredientUid, it.alias) },
-        s.recipes.map { R(it.uid, it.name, it.notes, it.ingredientUids) },
+        s.recipes.map { R(it.uid, it.name, it.notes, it.ingredientUids, it.color) },
         s.slots.map { S(it.weekStart.toString(), it.day, it.meal.name, it.recipeUid) },
         s.purchases.map { W(it.weekStart.toString(), it.ingredientUid) },
         s.extras.map { W(it.weekStart.toString(), it.ingredientUid) },
@@ -68,7 +68,7 @@ object LocalSyncJson {
         s.categories.map { SnapCategory(it.uid, it.name, it.position, it.builtinKey) },
         s.ingredients.map { SnapIngredient(it.uid, it.name, it.categoryUid, it.categoryManual) },
         s.aliases.map { SnapAlias(it.uid, it.ingredientUid, it.alias) },
-        s.recipes.map { SnapRecipe(it.uid, it.name, it.notes, it.ingredientUids) },
+        s.recipes.map { SnapRecipe(it.uid, it.name, it.notes, it.ingredientUids, it.color) },
         s.slots.map { SnapSlot(LocalDate.parse(it.weekStart), it.day, MealType.valueOf(it.meal), it.recipeUid) },
         s.purchases.map { SnapWeekItem(LocalDate.parse(it.weekStart), it.ingredientUid) }.toSet(),
         s.extras.map { SnapWeekItem(LocalDate.parse(it.weekStart), it.ingredientUid) }.toSet(),

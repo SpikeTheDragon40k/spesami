@@ -24,7 +24,15 @@ data class Ingredient(val id: Long, val name: String, val categoryId: Long? = nu
 
 data class IngredientAlias(val id: Long, val ingredientId: Long, val alias: String, val uid: String = "")
 
-data class Recipe(val id: Long, val name: String, val notes: String, val ingredientIds: List<Long>, val uid: String = "")
+/** [color] is set by hand (null = none) and tints the recipe's meals in the weekly plan. */
+data class Recipe(
+    val id: Long,
+    val name: String,
+    val notes: String,
+    val ingredientIds: List<Long>,
+    val uid: String = "",
+    val color: RecipeColor? = null,
+)
 
 /** One lunch or dinner of one day. [day] is 0 (Monday) .. 6 (Sunday) of the week starting on [weekStart]. */
 data class MealSlot(val weekStart: LocalDate, val day: Int, val meal: MealType, val recipeId: Long)

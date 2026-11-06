@@ -11,7 +11,8 @@ data class SnapIngredient(val uid: String, val name: String, val categoryUid: St
 
 data class SnapAlias(val uid: String, val ingredientUid: String, val alias: String)
 
-data class SnapRecipe(val uid: String, val name: String, val notes: String, val ingredientUids: List<String>)
+/** [color] is a [it.spesami.core.RecipeColor.key], null for none. */
+data class SnapRecipe(val uid: String, val name: String, val notes: String, val ingredientUids: List<String>, val color: String? = null)
 
 data class SnapSlot(val weekStart: LocalDate, val day: Int, val meal: MealType, val recipeUid: String)
 
@@ -77,7 +78,7 @@ class Snapshot(
                 categories = data.sortedCategories.map { SnapCategory(it.uid, it.name, it.position, it.builtinKey) },
                 ingredients = data.ingredients.map { SnapIngredient(it.uid, it.name, it.categoryId?.let(categoryUid::get), it.categoryManual) },
                 aliases = data.aliases.mapNotNull { a -> ingredientUid[a.ingredientId]?.let { SnapAlias(a.uid, it, a.alias) } },
-                recipes = data.recipes.map { r -> SnapRecipe(r.uid, r.name, r.notes, r.ingredientIds.mapNotNull(ingredientUid::get).distinct()) },
+                recipes = data.recipes.map { r -> SnapRecipe(r.uid, r.name, r.notes, r.ingredientIds.mapNotNull(ingredientUid::get).distinct(), r.color?.key) },
                 slots = data.slots.mapNotNull { s -> recipeUid[s.recipeId]?.let { SnapSlot(s.weekStart, s.day, s.meal, it) } },
                 purchases = items(data.purchases),
                 extras = items(data.manualItems),

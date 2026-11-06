@@ -1,7 +1,12 @@
 package it.spesami.app.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -151,9 +156,25 @@ private fun DayCard(data: AppData, week: LocalDate, day: Int, isToday: Boolean, 
 
 @Composable
 private fun MealRow(meal: MealType, recipe: Recipe?, data: AppData, onClick: () -> Unit) {
+    val tag = recipe?.color
+    Row(
+        Modifier.fillMaxWidth()
+            .then(if (tag != null) Modifier.background(tag.tint) else Modifier)
+            .height(IntrinsicSize.Min)
+            .clickable(onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // The recipe's colour: the whole row tinted, plus an accent bar at the start.
+        Box(Modifier.width(4.dp).fillMaxHeight().then(if (tag != null) Modifier.background(tag.swatch) else Modifier))
+        MealRowContent(meal, recipe, data)
+    }
+}
+
+@Composable
+private fun MealRowContent(meal: MealType, recipe: Recipe?, data: AppData) {
     val colors = MaterialTheme.colorScheme
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
+        Modifier.fillMaxWidth().padding(start = 12.dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(

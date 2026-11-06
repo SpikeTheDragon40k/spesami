@@ -1,9 +1,16 @@
 package it.spesami.app.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -23,6 +30,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -54,6 +62,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
@@ -63,6 +75,7 @@ import it.spesami.core.IngredientNames
 import it.spesami.core.IngredientResolver
 import it.spesami.core.MealType
 import it.spesami.core.Recipe
+import it.spesami.core.RecipeColor
 import java.text.Collator
 import java.util.Locale
 
@@ -126,6 +139,7 @@ fun RecipePickerSheet(
             items(recipes, key = { it.id }) { recipe ->
                 val ingredients = recipe.ingredientIds.mapNotNull { data.ingredientsById[it]?.name }.joinToString(", ")
                 ListItem(
+                    leadingContent = { RecipeColorDot(recipe.color) },
                     headlineContent = { Text(recipe.name) },
                     supportingContent = if (ingredients.isEmpty()) null else {
                         { Text(ingredients, maxLines = 1, overflow = TextOverflow.Ellipsis) }
@@ -146,13 +160,14 @@ fun RecipePickerSheet(
 fun RecipeEditor(
     request: RecipeEditRequest,
     data: AppData,
-    onSave: (name: String, notes: String, ingredients: List<String>) -> Unit,
+    onSave: (name: String, notes: String, ingredients: List<String>, color: RecipeColor?) -> Unit,
     onDelete: (() -> Unit)?,
     onClose: () -> Unit,
 ) {
     val recipe = request.recipe
     var name by rememberSaveable { mutableStateOf(recipe?.name.orEmpty()) }
     var notes by rememberSaveable { mutableStateOf(recipe?.notes.orEmpty()) }
+    var colorKey by rememberSaveable { mutableStateOf(recipe?.color?.key) }
     val ingredients = remember {
         mutableStateListOf<String>().apply { recipe?.ingredientIds?.mapNotNullTo(this) { data.ingredientsById[it]?.name } }
     }
@@ -192,7 +207,7 @@ fun RecipeEditor(
                         enabled = name.isNotBlank(),
                         onClick = {
                             if (input.isNotBlank()) addTyped(input)
-                            onSave(name, notes, ingredients.toList())
+                            onSave(name, notes, ingredients.toList(), RecipeColor.fromKey(colorKey))
                         },
                     ) { Text("Salva") }
                 },
@@ -246,6 +261,8 @@ fun RecipeEditor(
                     }
                 }
             }
+            Text("Colore nel piano", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+            ColorPicker(RecipeColor.fromKey(colorKey)) { colorKey = it?.key }
             OutlinedTextField(
                 value = notes,
                 onValueChange = { notes = it },
@@ -264,7 +281,7 @@ fun RecipeEditor(
                 enabled = name.isNotBlank(),
                 onClick = {
                     if (input.isNotBlank()) addTyped(input)
-                    onSave(name, notes, ingredients.toList())
+                    onSave(name, notes, ingredients.toList(), RecipeColor.fromKey(colorKey))
                 },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Salva ricetta") }
@@ -286,4 +303,53 @@ fun RecipeEditor(
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Annulla") } },
         )
     }
+}
+
+/** "Nessuno" plus the eight [RecipeColor]s, as dots in the theme's own shade; the chosen one is ticked. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ColorPicker(selected: RecipeColor?, onSelect: (RecipeColor?) -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            ColorDot(null, selected == null, "Nessun colore") { onSelect(null) }
+            RecipeColor.entries.forEach { c -> ColorDot(c, selected == c, c.label) { onSelect(c) } }
+        }
+        Text(
+            if (selected == null) "Nessun colore: il pasto resta come gli altri." else "${selected.label}: colora i pasti con questa ricetta nel piano e nel PDF.",
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun ColorDot(color: RecipeColor?, selected: Boolean, label: String, onClick: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    val fill = color?.swatch ?: colors.surface
+    Box(
+        Modifier.size(40.dp)
+            .clip(CircleShape)
+            .background(fill)
+            .border(if (selected) 3.dp else 1.dp, if (selected) colors.onSurface else colors.outline, CircleShape)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        when {
+            selected && color != null -> Icon(Icons.Default.Check, null, tint = if (color.isLightSwatch()) Color.Black else Color.White, modifier = Modifier.size(22.dp))
+            selected -> Icon(Icons.Default.Check, null, tint = colors.onSurface, modifier = Modifier.size(22.dp))
+            color == null -> Icon(Icons.Default.Close, null, tint = colors.outline, modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
+/** Whether the dot shown for this colour in the current theme is light enough to need a dark tick. */
+@Composable
+private fun RecipeColor.isLightSwatch(): Boolean = swatch.luminance() > 0.4f
+
+/** The recipe's colour as a small dot for lists; an empty space of the same size when it has none, so names align. */
+@Composable
+fun RecipeColorDot(color: RecipeColor?) {
+    Box(Modifier.size(12.dp).then(if (color != null) Modifier.clip(CircleShape).background(color.swatch) else Modifier))
 }

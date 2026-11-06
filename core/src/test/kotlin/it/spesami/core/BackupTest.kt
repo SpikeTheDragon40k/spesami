@@ -131,4 +131,40 @@ class BackupTest {
         val result = Backup.decode(old) as BackupReadResult.Valid
         assertTrue(result.data.ingredients.all { it.uid.isEmpty() })
     }
+
+    // --- Recipe colours (app 1.5.0)
+
+    @Test
+    fun roundTripKeepsRecipeColours() {
+        val coloured = withUids.copy(recipes = withUids.recipes.map { it.copy(color = RecipeColor.GREEN) })
+        val text = Backup.encode(coloured, "2026-11-06")
+        assertTrue("\"color\": \"green\"" in text)
+        assertEquals(coloured, (Backup.decode(text) as BackupReadResult.Valid).data)
+    }
+
+    @Test
+    fun backupsWithoutColoursRestoreWithNone() {
+        // A 1.4.0 backup: no "color" key anywhere.
+        val old = Backup.encode(withUids, "2026-11-03")
+        assertTrue("\"color\"" !in old)
+        val result = Backup.decode(old) as BackupReadResult.Valid
+        assertTrue(result.data.recipes.all { it.color == null })
+        assertEquals(withUids, result.data)
+    }
+
+    @Test
+    fun anUnknownColourFromANewerAppIsNoColourNotAnError() {
+        val full = Json.parseToJsonElement(Backup.encode(withUids, "2026-11-06")).jsonObject.toString()
+        val newer = full.replace("\"uid\":\"rec-5\"", "\"uid\":\"rec-5\",\"color\":\"ultraviolet\"")
+        assertTrue("ultraviolet" in newer)
+        val result = Backup.decode(newer) as BackupReadResult.Valid
+        assertEquals(null, result.data.recipes.single().color)
+    }
+
+    @Test
+    fun formatVersionStaysThreeSoOlderAppsStillReadIt() {
+        val coloured = data.copy(recipes = data.recipes.map { it.copy(color = RecipeColor.RED) })
+        val json = Json.parseToJsonElement(Backup.encode(coloured, "2026-11-06")).jsonObject
+        assertEquals(JsonPrimitive(3), json["version"])
+    }
 }

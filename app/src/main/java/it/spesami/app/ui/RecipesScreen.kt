@@ -84,6 +84,7 @@ fun RecipesScreen(data: AppData, onEdit: (RecipeEditRequest) -> Unit, onOpenIngr
                     val ingredients = recipe.ingredientIds.mapNotNull { data.ingredientsById[it]?.name }
                     val used = uses[recipe.id] ?: 0
                     ListItem(
+                        leadingContent = { RecipeColorDot(recipe.color) },
                         headlineContent = { Text(recipe.name) },
                         supportingContent = {
                             Text(

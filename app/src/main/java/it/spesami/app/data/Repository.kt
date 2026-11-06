@@ -11,6 +11,7 @@ import it.spesami.core.IngredientNames
 import it.spesami.core.MealSlot
 import it.spesami.core.MealType
 import it.spesami.core.Recipe
+import it.spesami.core.RecipeColor
 import it.spesami.core.ShoppingCategory
 import it.spesami.core.Uids
 import it.spesami.core.sync.Snapshot
@@ -39,11 +40,11 @@ class Repository(private val helper: SpesamiDatabase) {
         db.rawQuery("SELECT recipe_id, ingredient_id FROM recipe_ingredient ORDER BY recipe_id, position", null).use { c ->
             while (c.moveToNext()) recipeIngredients.getOrPut(c.getLong(0)) { mutableListOf() } += c.getLong(1)
         }
-        val recipes = db.rawQuery("SELECT id, name, notes, uid FROM recipe", null).use { c ->
+        val recipes = db.rawQuery("SELECT id, name, notes, uid, color FROM recipe", null).use { c ->
             buildList {
                 while (c.moveToNext()) {
                     val id = c.getLong(0)
-                    add(Recipe(id, c.getString(1), c.getString(2), recipeIngredients[id].orEmpty(), c.getString(3)))
+                    add(Recipe(id, c.getString(1), c.getString(2), recipeIngredients[id].orEmpty(), c.getString(3), RecipeColor.fromKey(c.getString(4))))
                 }
             }
         }
@@ -67,10 +68,11 @@ class Repository(private val helper: SpesamiDatabase) {
     // --- Recipes ---
 
     /** Creates or updates a recipe; each typed ingredient name is matched to an existing ingredient or alias, or created. */
-    fun saveRecipe(id: Long?, name: String, notes: String, ingredientNames: List<String>): Long = inTransaction {
+    fun saveRecipe(id: Long?, name: String, notes: String, ingredientNames: List<String>, color: RecipeColor? = null): Long = inTransaction {
         val values = ContentValues().apply {
             put("name", name.trim())
             put("notes", notes.trim())
+            put("color", color?.key)
         }
         val recipeId = if (id == null) {
             db.insertOrThrow("recipe", null, values.apply { put("uid", Uids.random()) })
@@ -383,6 +385,7 @@ class Repository(private val helper: SpesamiDatabase) {
                 put("name", r.name)
                 put("notes", r.notes)
                 put("uid", r.uid.ifEmpty { Uids.random() })
+                put("color", r.color?.key)
             })
             r.ingredientIds.forEachIndexed { position, ingredientId ->
                 db.insertOrThrow("recipe_ingredient", null, ContentValues().apply {
@@ -453,6 +456,7 @@ class Repository(private val helper: SpesamiDatabase) {
             db.update("recipe", ContentValues().apply {
                 put("name", r.name)
                 put("notes", r.notes)
+                put("color", RecipeColor.fromKey(r.color)?.key)
             }, "uid = ?", arrayOf(r.uid))
             r.ingredientUids.mapNotNull(ingredientIds::get).distinct().forEachIndexed { position, ingredientId ->
                 db.insertOrThrow("recipe_ingredient", null, ContentValues().apply {

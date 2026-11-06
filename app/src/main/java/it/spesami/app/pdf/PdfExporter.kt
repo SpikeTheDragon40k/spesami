@@ -11,6 +11,7 @@ import it.spesami.core.MealType
 import it.spesami.core.ExportSection
 import it.spesami.core.PdfLine
 import it.spesami.core.PdfListLayout
+import it.spesami.core.RecipeColor
 import it.spesami.core.ShoppingExport
 import it.spesami.core.Weeks
 import java.io.OutputStream
@@ -30,7 +31,19 @@ class PdfPalette(
     val line: Int,
     /** False draws the title band as an outline instead of a filled block (ink saver). */
     val solidHeader: Boolean = true,
+    /** Dark page: recipe colours use their dark shades. */
+    val dark: Boolean = false,
 ) {
+    /** Background of a meal cell of a recipe of colour [c]. Ink saver: half as strong as the light tint. */
+    fun recipeTint(c: RecipeColor): Int = when {
+        dark -> c.tintDark
+        solidHeader -> c.tintLight
+        else -> blendWithWhite(c.tintLight)
+    }
+
+    /** The accent bar of a coloured meal cell. */
+    fun recipeSwatch(c: RecipeColor): Int = if (dark) c.swatchDark else c.swatchLight
+
     companion object {
         val Light = PdfPalette(
             background = 0xFFFFFFFF.toInt(),
@@ -51,6 +64,7 @@ class PdfPalette(
             onAccent = 0xFF282A36.toInt(),
             highlight = 0xFFFF79C6.toInt(),
             line = 0xFF44475A.toInt(),
+            dark = true,
         )
         val InkSaver = PdfPalette(
             background = 0xFFFFFFFF.toInt(),
@@ -63,6 +77,11 @@ class PdfPalette(
             line = 0xFFBBBBBB.toInt(),
             solidHeader = false,
         )
+
+        private fun blendWithWhite(argb: Int): Int {
+            fun ch(shift: Int) = ((argb shr shift and 0xFF) + 0xFF) / 2
+            return (0xFF shl 24) or (ch(16) shl 16) or (ch(8) shl 8) or ch(0)
+        }
     }
 }
 
@@ -78,7 +97,10 @@ object PdfExporter {
         this.typeface = typeface
     }
 
-    /** Weekly plan: A4 landscape, one row per day, lunch and dinner columns with each meal's ingredients. */
+    /**
+     * Weekly plan: A4 landscape, one row per day, lunch and dinner columns with each meal's ingredients. A meal whose
+     * recipe has a colour gets its cell tinted with it, with an accent bar on the left.
+     */
     fun writeWeekPlan(data: AppData, weekStart: LocalDate, palette: PdfPalette, out: OutputStream) {
         val width = 842
         val height = 595
@@ -105,6 +127,8 @@ object PdfExporter {
         val datePaint = paint(palette.muted, 9.5f)
         val namePaint = paint(palette.text, 10.5f, bold)
         val ingredientsPaint = paint(palette.muted, 8.5f)
+        // The muted colour is too faint on a coloured cell; the smaller size still sets ingredients apart.
+        val ingredientsOnColourPaint = paint(palette.text, 8.5f)
         val emptyPaint = paint(palette.line, 10.5f, bold)
         val fill = Paint(Paint.ANTI_ALIAS_FLAG)
         val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 0.8f; color = palette.line }
@@ -127,6 +151,14 @@ object PdfExporter {
                 val maxWidth = mealWidth - 20
                 if (i > 0) c.drawLine(left - 10, top + 10, left - 10, top + rowHeight - 10, stroke)
                 val recipe = slots[day to meal]?.let { data.recipesById[it.recipeId] }
+                recipe?.color?.let { colour ->
+                    val cellLeft = left - 10 + 4
+                    val cell = RectF(cellLeft, top + 6, cellLeft + mealWidth - 8, top + rowHeight - 6)
+                    fill.color = palette.recipeTint(colour)
+                    c.drawRoundRect(cell, 6f, 6f, fill)
+                    fill.color = palette.recipeSwatch(colour)
+                    c.drawRoundRect(RectF(cell.left, cell.top, cell.left + 3, cell.bottom), 1.5f, 1.5f, fill)
+                }
                 if (recipe == null) {
                     c.drawText("—", left, top + 22, emptyPaint)
                     return@forEachIndexed
@@ -138,7 +170,8 @@ object PdfExporter {
                 val room = ((top + rowHeight - 8 - lineY) / 11).toInt() + 1
                 if (ingredients.isNotEmpty() && room > 0) {
                     lineY += 1
-                    wrap(ingredients, ingredientsPaint, maxWidth, room).forEach { c.drawText(it, left, lineY, ingredientsPaint); lineY += 11 }
+                    val paint = if (recipe.color != null) ingredientsOnColourPaint else ingredientsPaint
+                    wrap(ingredients, paint, maxWidth, room).forEach { c.drawText(it, left, lineY, paint); lineY += 11 }
                 }
             }
         }

@@ -86,9 +86,11 @@ class Phone(private val world: World, val name: String, private val skewMs: Long
         var s = db
         val ids = ingredients.map { n -> findOrCreate(s, n).also { s = it.first }.second }.distinct()
         val recipeUid = uid ?: newUid()
-        val recipe = SnapRecipe(recipeUid, name, notes, ids)
+        val recipe = SnapRecipe(recipeUid, name, notes, ids, db.recipes.firstOrNull { it.uid == recipeUid }?.color)
         return s.copy(recipes = s.recipes.filter { it.uid != recipeUid } + recipe)
     }
+
+    fun setColor(recipe: String, color: String?) = db.copy(recipes = db.recipes.map { if (it.uid == recipe) it.copy(color = color) else it })
 
     fun deleteRecipe(uid: String) = db.copy(recipes = db.recipes.filter { it.uid != uid }, slots = db.slots.filter { it.recipeUid != uid })
 
